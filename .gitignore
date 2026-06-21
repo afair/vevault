@@ -1,0 +1,11 @@
+# Binary
+vv
+vv-*
+
+# Test artifacts
+/tmp/
+
+# IDE
+.idea/
+.vscode/
+*.swp

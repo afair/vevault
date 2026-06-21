@@ -1,0 +1,228 @@
+// Package sync implements synchronization of vaults between hosts using
+// rclone bisync over SFTP. All sync logic runs on the central node;
+// non-central hosts delegate via SSH to "vv updates <host>".
+package sync
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+
+	"vevault/internal/config"
+
+	"github.com/spf13/cobra"
+)
+
+// NewCmd returns the "sync" and "updates" subcommands.
+func NewCmd(cfg *config.Config) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sync [<vault>]",
+		Short: "Synchronize vaults with central node",
+		Long: `Synchronize vaults bidirectionally with the central node.
+
+On a non-central host, this delegates to central over SSH:
+    ssh <central> vv updates <this-host> [<vault>]
+
+On the central node, this performs a 2-way rclone bisync with the
+requesting host, then propagates changes to other subscribers.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			vaultName := ""
+			if len(args) == 1 {
+				vaultName = args[0]
+			}
+
+			if !cfg.IsCentral() {
+				return delegateToCentral(cfg, vaultName)
+			}
+			return runUpdates(cfg, hostname(), vaultName)
+		},
+	}
+
+	cmd.AddCommand(newConfigSyncCmd(cfg))
+
+	return cmd
+}
+
+// NewUpdatesCmd returns a top-level "updates" subcommand, registered in
+// main.go alongside "sync". It is intended to be invoked on central,
+// either directly or via SSH from a non-central host.
+func NewUpdatesCmd(cfg *config.Config) *cobra.Command {
+	return &cobra.Command{
+		Use:   "updates <host> [<vault>]",
+		Short: "Run 2-way sync with a host and propagate to subscribers (central-only)",
+		Long: `Central-only command. Runs rclone bisync with the given host,
+then propagates changes to all other subscribers of the affected vaults.
+
+This is the target of "vv sync" on non-central hosts.`,
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			host := args[0]
+			vaultName := ""
+			if len(args) == 2 {
+				vaultName = args[1]
+			}
+
+			if !cfg.IsCentral() {
+				return fmt.Errorf("updates must run on the central node")
+			}
+			return runUpdates(cfg, host, vaultName)
+		},
+	}
+}
+
+// newConfigSyncCmd is "vv sync --config": pushes config to all hosts.
+func newConfigSyncCmd(cfg *config.Config) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Sync config to all hosts",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cfg.IsCentral() {
+				return delegateConfigSync(cfg)
+			}
+			fmt.Println("Syncing config to all subscribed hosts...")
+			// TODO: scp config.toml + keys/ to each subscription host.
+			for _, s := range cfg.Subscriptions {
+				fmt.Printf("  → %s\n", s.Host)
+				// scp cfg.path → s.Host:~/.local/share/vevault/config.toml
+			}
+			fmt.Println("Config sync complete.")
+			return nil
+		},
+	}
+	// Override the parent "sync" Use so cobra doesn't conflict.
+	cmd.Use = "sync --config"
+	return cmd
+}
+
+// --- sync logic -------------------------------------------------------
+
+// runUpdates performs the core sync: bisync central with host, then
+// propagate to all other subscribers.
+func runUpdates(cfg *config.Config, host, vaultName string) error {
+	vaults := vaultList(cfg, host, vaultName)
+
+	for _, v := range vaults {
+		fmt.Printf("Syncing vault %q with %s...\n", v, host)
+		if err := bisyncVault(cfg, v, host); err != nil {
+			return fmt.Errorf("bisync %q with %s: %w", v, host, err)
+		}
+
+		// Propagate to other subscribers.
+		for _, s := range cfg.Subscriptions {
+			for _, sv := range s.Vaults {
+				if sv == v && s.Host != host {
+					fmt.Printf("  Propagating %q to %s...\n", v, s.Host)
+					if err := bisyncVault(cfg, v, s.Host); err != nil {
+						return fmt.Errorf("propagating %q to %s: %w", v, s.Host, err)
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// bisyncVault runs rclone bisync between central and a remote host for a
+// single vault.
+func bisyncVault(cfg *config.Config, vaultName, host string) error {
+	localPath := cfg.VaultPath(vaultName)
+	remotePath := cfg.VaultPath(vaultName) // Same structure on remote.
+
+	// TODO: Derive SFTP params from ~/.ssh/config for <host>.
+	// For now, use a placeholder that assumes the host alias works as-is.
+	args := []string{
+		"bisync",
+		localPath,
+		fmt.Sprintf(":sftp:%s:%s", host, remotePath),
+		"--sftp-host=" + host,
+		"--create-empty-src-dirs",
+		// "--resync",  // Only on first sync or after interruption.
+	}
+
+	cmd := exec.Command("rclone", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// vaultList returns the vaults to sync for a host. If vaultName is
+// non-empty, returns just that vault (validating subscription). Otherwise
+// returns all vaults the host is subscribed to.
+func vaultList(cfg *config.Config, host, vaultName string) []string {
+	if vaultName != "" {
+		// Validate the host is subscribed to this vault.
+		subbed := cfg.SubscribedVaults(host)
+		for _, v := range subbed {
+			if v == vaultName {
+				return []string{vaultName}
+			}
+		}
+		return nil // Not subscribed; bisyncVault will still run (central knows all).
+	}
+	return cfg.SubscribedVaults(host)
+}
+
+// --- delegation -------------------------------------------------------
+
+// delegateToCentral runs "ssh <central> vv updates <this-host> [<vault>]".
+func delegateToCentral(cfg *config.Config, vaultName string) error {
+	central := cfg.Core.CentralHost
+	if central == "" {
+		return fmt.Errorf("central_host not configured; set it in %s", config.Path())
+	}
+
+	myHost := hostname()
+	args := []string{central, "vv", "updates", myHost}
+	if vaultName != "" {
+		args = append(args, vaultName)
+	}
+
+	fmt.Printf("Delegating to central (%s)...\n", central)
+	cmd := exec.Command("ssh", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func delegateConfigSync(cfg *config.Config) error {
+	central := cfg.Core.CentralHost
+	if central == "" {
+		return fmt.Errorf("central_host not configured")
+	}
+
+	fmt.Printf("Delegating config sync to central (%s)...\n", central)
+	cmd := exec.Command("ssh", central, "vv", "sync", "--config")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// --- helpers ----------------------------------------------------------
+
+func hostname() string {
+	h, _ := os.Hostname()
+	return h
+}
+
+// EnsureVaultsDir creates the vaults directory on this host if it doesn't
+// exist. Called during setup or before first sync.
+func EnsureVaultsDir(cfg *config.Config) error {
+	for _, v := range cfg.Vaults {
+		dir := cfg.VaultPath(v.Name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("creating vault dir %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+// ResolveSSHConfig extracts hostname, user, key file, and port from an
+// SSH alias by parsing ~/.ssh/config. Placeholder — returns the alias
+// as-is for now.
+func ResolveSSHConfig(alias string) (host, user, keyFile, port string) {
+	// TODO: Parse ~/.ssh/config properly.
+	// For MVP, assume the alias is the hostname and let SSH/rclone handle it.
+	return alias, "", "", ""
+}

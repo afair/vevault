@@ -183,6 +183,13 @@ func subscribeFromRemote(cfg *config.Config, vaultName, symlink, address string)
 		myHost = address // Use --address value as the host identity.
 	}
 
+	// Create the local vault directory so rclone bisync --resync can
+	// populate it from central.
+	vaultPath := cfg.VaultPath(vaultName)
+	if err := os.MkdirAll(vaultPath, 0o755); err != nil {
+		return fmt.Errorf("creating local vault directory: %w", err)
+	}
+
 	fmt.Printf("Subscribing this host (%s) to vault %q via %s...\n", myHost, vaultName, central)
 
 	// 1. Delegate subscription + initial sync to central.

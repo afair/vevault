@@ -17,6 +17,7 @@ func NewSubscribeCmd(cfg *config.Config) *cobra.Command {
 	var (
 		hosts   []string
 		symlink string
+		address string
 	)
 
 	cmd := &cobra.Command{
@@ -28,20 +29,22 @@ On the central node, use --host to subscribe other hosts:
     vv subscribe personal --host laptop --host workstation
 
 On a non-central host, subscribe this host (delegates to central via SSH):
-    vv subscribe personal --symlink ~/Documents/Personal`,
+    vv subscribe personal --symlink ~/Documents/Personal
+    vv subscribe personal --address macbook.tailnet.ts.net`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			vaultName := args[0]
 
 			if cfg.IsCentral() {
-				return subscribeOnCentral(cfg, vaultName, hosts)
+				return subscribeOnCentral(cfg, vaultName, hosts, address)
 			}
-			return subscribeFromRemote(cfg, vaultName, symlink)
+			return subscribeFromRemote(cfg, vaultName, symlink, address)
 		},
 	}
 
 	cmd.Flags().StringArrayVar(&hosts, "host", nil, "Hosts to subscribe (central-only, repeatable)")
 	cmd.Flags().StringVar(&symlink, "symlink", "", "Create a symlink at this path after subscribing (remote only)")
+	cmd.Flags().StringVar(&address, "address", "", "How to reach this host (Tailscale name, IP, etc.)")
 
 	return cmd
 }
@@ -82,7 +85,7 @@ On a non-central host, unsubscribe this host (delegates via SSH):
 
 // --- central-side logic -----------------------------------------------
 
-func subscribeOnCentral(cfg *config.Config, vaultName string, hosts []string) error {
+func subscribeOnCentral(cfg *config.Config, vaultName string, hosts []string, address string) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("--host is required when running on central")
 	}
@@ -97,7 +100,7 @@ func subscribeOnCentral(cfg *config.Config, vaultName string, hosts []string) er
 		if h == "" {
 			continue
 		}
-		added, err := addSubscription(cfg, vaultName, h)
+		added, err := addSubscription(cfg, vaultName, h, address)
 		if err != nil {
 			return err
 		}
@@ -167,7 +170,7 @@ func unsubscribeOnCentral(cfg *config.Config, vaultName, host string) error {
 
 // --- remote-side logic -----------------------------------------------
 
-func subscribeFromRemote(cfg *config.Config, vaultName, symlink string) error {
+func subscribeFromRemote(cfg *config.Config, vaultName, symlink, address string) error {
 	central := cfg.Core.CentralHost
 	if central == "" {
 		return fmt.Errorf("central_host not set — cannot subscribe from a remote host without it")
@@ -179,6 +182,9 @@ func subscribeFromRemote(cfg *config.Config, vaultName, symlink string) error {
 
 	// 1. Delegate subscription + initial sync to central.
 	args := []string{cfg.CentralAddress(), "vv", "subscribe", vaultName, "--host", myHost}
+	if address != "" {
+		args = append(args, "--address", address)
+	}
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -268,10 +274,14 @@ func purgeLocalVault(cfg *config.Config, vaultName string) {
 
 // --- helpers ----------------------------------------------------------
 
-func addSubscription(cfg *config.Config, vaultName, host string) (bool, error) {
+func addSubscription(cfg *config.Config, vaultName, host, address string) (bool, error) {
 	// Find existing subscription for this host or create one.
 	for i := range cfg.Subscriptions {
 		if cfg.Subscriptions[i].Host == host {
+			// Update address if provided.
+			if address != "" {
+				cfg.Subscriptions[i].Address = address
+			}
 			// Check if already subscribed.
 			for _, v := range cfg.Subscriptions[i].Vaults {
 				if v == vaultName {
@@ -285,8 +295,9 @@ func addSubscription(cfg *config.Config, vaultName, host string) (bool, error) {
 
 	// New subscription entry.
 	cfg.Subscriptions = append(cfg.Subscriptions, config.Subscription{
-		Host:   host,
-		Vaults: []string{vaultName},
+		Host:    host,
+		Address: address,
+		Vaults:  []string{vaultName},
 	})
 	return true, nil
 }

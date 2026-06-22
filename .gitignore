@@ -2,6 +2,9 @@
 vv
 vv-*
 
+# Test binaries
+*.test
+
 # Test artifacts
 /tmp/
 

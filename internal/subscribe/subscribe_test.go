@@ -29,7 +29,7 @@ func setup(t *testing.T) (*config.Config, string) {
 func TestSubscribeOnCentral_SingleHost(t *testing.T) {
 	cfg, _ := setup(t)
 
-	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}); err != nil {
+	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}, ""); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 
@@ -42,7 +42,7 @@ func TestSubscribeOnCentral_SingleHost(t *testing.T) {
 func TestSubscribeOnCentral_MultipleHosts(t *testing.T) {
 	cfg, _ := setup(t)
 
-	if err := subscribeOnCentral(cfg, "media", []string{"laptop", "workstation"}); err != nil {
+	if err := subscribeOnCentral(cfg, "media", []string{"laptop", "workstation"}, ""); err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 
@@ -57,10 +57,10 @@ func TestSubscribeOnCentral_MultipleHosts(t *testing.T) {
 func TestSubscribeOnCentral_MultipleVaultsSameHost(t *testing.T) {
 	cfg, _ := setup(t)
 
-	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}); err != nil {
+	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := subscribeOnCentral(cfg, "media", []string{"laptop"}); err != nil {
+	if err := subscribeOnCentral(cfg, "media", []string{"laptop"}, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,11 +74,11 @@ func TestSubscribeOnCentral_Duplicate(t *testing.T) {
 	cfg, _ := setup(t)
 
 	// First subscription.
-	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}); err != nil {
+	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	// Duplicate should be a no-op.
-	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}); err != nil {
+	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -114,7 +114,7 @@ func TestSubscribeOnCentral_NoHostFlag(t *testing.T) {
 func TestSubscribeOnCentral_UnknownVault(t *testing.T) {
 	cfg, _ := setup(t)
 
-	err := subscribeOnCentral(cfg, "nonexistent", []string{"laptop"})
+	err := subscribeOnCentral(cfg, "nonexistent", []string{"laptop"}, "")
 	if err == nil {
 		t.Fatal("expected error for unknown vault")
 	}
@@ -126,7 +126,7 @@ func TestUnsubscribeOnCentral(t *testing.T) {
 	cfg, _ := setup(t)
 
 	// Subscribe first.
-	if err := subscribeOnCentral(cfg, "docs", []string{"laptop", "workstation"}); err != nil {
+	if err := subscribeOnCentral(cfg, "docs", []string{"laptop", "workstation"}, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -147,7 +147,7 @@ func TestUnsubscribeOnCentral(t *testing.T) {
 func TestUnsubscribeOnCentral_LastVaultCleansEntry(t *testing.T) {
 	cfg, _ := setup(t)
 
-	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}); err != nil {
+	if err := subscribeOnCentral(cfg, "docs", []string{"laptop"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := unsubscribeOnCentral(cfg, "docs", "laptop"); err != nil {
@@ -188,7 +188,7 @@ func TestSubscribeFromRemote_NoCentralHost(t *testing.T) {
 	cfg, _ := setup(t)
 	cfg.Core.CentralHost = ""
 
-	err := subscribeFromRemote(cfg, "docs", "")
+	err := subscribeFromRemote(cfg, "docs", "", "")
 	if err == nil {
 		t.Fatal("expected error when central_host is not set")
 	}
@@ -248,7 +248,7 @@ func TestUnsubscribeFromRemote_Purge(t *testing.T) {
 func TestAddSubscription_New(t *testing.T) {
 	cfg, _ := setup(t)
 
-	added, err := addSubscription(cfg, "docs", "laptop")
+	added, err := addSubscription(cfg, "docs", "laptop", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,8 +263,8 @@ func TestAddSubscription_New(t *testing.T) {
 func TestAddSubscription_Duplicate(t *testing.T) {
 	cfg, _ := setup(t)
 
-	addSubscription(cfg, "docs", "laptop")
-	added, err := addSubscription(cfg, "docs", "laptop")
+	addSubscription(cfg, "docs", "laptop", "")
+	added, err := addSubscription(cfg, "docs", "laptop", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,8 +276,8 @@ func TestAddSubscription_Duplicate(t *testing.T) {
 func TestAddSubscription_SecondVault(t *testing.T) {
 	cfg, _ := setup(t)
 
-	addSubscription(cfg, "docs", "laptop")
-	added, err := addSubscription(cfg, "media", "laptop")
+	addSubscription(cfg, "docs", "laptop", "")
+	added, err := addSubscription(cfg, "media", "laptop", "")
 	if err != nil {
 		t.Fatal(err)
 	}

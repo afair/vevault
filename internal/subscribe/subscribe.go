@@ -178,7 +178,7 @@ func subscribeFromRemote(cfg *config.Config, vaultName, symlink string) error {
 	fmt.Printf("Subscribing this host (%s) to vault %q via %s...\n", myHost, vaultName, central)
 
 	// 1. Delegate subscription + initial sync to central.
-	args := []string{central, "vv", "subscribe", vaultName, "--host", myHost}
+	args := []string{cfg.CentralAddress(), "vv", "subscribe", vaultName, "--host", myHost}
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -219,7 +219,7 @@ func unsubscribeFromRemote(cfg *config.Config, vaultName string, purge bool) err
 	myHost, _ := os.Hostname()
 
 	// 1. Delegate unsubscribe to central (best-effort).
-	args := []string{central, "vv", "unsubscribe", vaultName, "--host", myHost}
+	args := []string{cfg.CentralAddress(), "vv", "unsubscribe", vaultName, "--host", myHost}
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -295,13 +295,13 @@ func addSubscription(cfg *config.Config, vaultName, host string) (bool, error) {
 // treated as authoritative (used for initial subscription sync).
 func execBisync(cfg *config.Config, vaultName, host string, resync bool) error {
 	localPath := cfg.VaultPath(vaultName)
-	remotePath := cfg.VaultPath(vaultName)
+	remotePath := cfg.RemoteVaultPath(vaultName, host)
 
 	args := []string{
 		"bisync",
 		localPath,
-		fmt.Sprintf(":sftp:%s:%s", host, remotePath),
-		"--sftp-host=" + host,
+		fmt.Sprintf(":sftp:%s:%s", cfg.HostAddress(host), remotePath),
+		"--sftp-host=" + cfg.HostAddress(host),
 		"--create-empty-src-dirs",
 	}
 	if resync {

@@ -259,6 +259,129 @@ func TestSubscribedVaults(t *testing.T) {
 	}
 }
 
+func TestRemoteVaultPath_Override(t *testing.T) {
+	cfg := Default()
+	cfg.Core.VaultsDir = "/home/allen/vaults"
+	cfg.Vaults = []VaultConfig{
+		{Name: "docs"},
+	}
+	cfg.Subscriptions = []Subscription{
+		{Host: "macbook", Vaults: []string{"docs"}, Paths: map[string]string{
+			"docs": "/Users/allen/vaults/docs",
+		}},
+	}
+
+	p := cfg.RemoteVaultPath("docs", "macbook")
+	if p != "/Users/allen/vaults/docs" {
+		t.Errorf("RemoteVaultPath = %q, want /Users/allen/vaults/docs", p)
+	}
+}
+
+func TestRemoteVaultPath_Fallback(t *testing.T) {
+	cfg := Default()
+	cfg.Core.VaultsDir = "/home/allen/vaults"
+	cfg.Vaults = []VaultConfig{
+		{Name: "docs"},
+	}
+	cfg.Subscriptions = []Subscription{
+		{Host: "laptop", Vaults: []string{"docs"}},
+	}
+
+	// No paths override — should fall back to VaultPath.
+	p := cfg.RemoteVaultPath("docs", "laptop")
+	expected := cfg.VaultPath("docs")
+	if p != expected {
+		t.Errorf("RemoteVaultPath = %q, want %q", p, expected)
+	}
+}
+
+func TestVaultPath_TildeExpansion(t *testing.T) {
+	cfg := Default()
+	cfg.Core.VaultsDir = "~/vaults"
+
+	p := cfg.VaultPath("docs")
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, "vaults", "docs")
+	if p != expected {
+		t.Errorf("VaultPath = %q, want %q", p, expected)
+	}
+}
+
+func TestVaultPath_TildeOnly(t *testing.T) {
+	cfg := Default()
+	cfg.Core.VaultsDir = "~"
+	cfg.Vaults = []VaultConfig{
+		{Name: "rootvault", Path: "~"},
+	}
+
+	p := cfg.VaultPath("rootvault")
+	home, _ := os.UserHomeDir()
+	if p != home {
+		t.Errorf("VaultPath = %q, want %q", p, home)
+	}
+}
+
+func TestCentralAddress_Fallback(t *testing.T) {
+	cfg := Default()
+	cfg.Core.CentralHost = "homeserver"
+	if a := cfg.CentralAddress(); a != "homeserver" {
+		t.Errorf("CentralAddress = %q, want homeserver", a)
+	}
+}
+
+func TestCentralAddress_Override(t *testing.T) {
+	cfg := Default()
+	cfg.Core.CentralHost = "homeserver"
+	cfg.Core.CentralAddress = "100.64.0.5"
+	if a := cfg.CentralAddress(); a != "100.64.0.5" {
+		t.Errorf("CentralAddress = %q, want 100.64.0.5", a)
+	}
+}
+
+func TestHostAddress_Fallback(t *testing.T) {
+	cfg := Default()
+	cfg.Subscriptions = []Subscription{
+		{Host: "macbook", Vaults: []string{"docs"}},
+	}
+	if a := cfg.HostAddress("macbook"); a != "macbook" {
+		t.Errorf("HostAddress = %q, want macbook", a)
+	}
+}
+
+func TestHostAddress_Override(t *testing.T) {
+	cfg := Default()
+	cfg.Subscriptions = []Subscription{
+		{Host: "macbook", Address: "macbook.tailnet.ts.net", Vaults: []string{"docs"}},
+	}
+	if a := cfg.HostAddress("macbook"); a != "macbook.tailnet.ts.net" {
+		t.Errorf("HostAddress = %q, want macbook.tailnet.ts.net", a)
+	}
+}
+
+func TestHostAddress_Unknown(t *testing.T) {
+	cfg := Default()
+	if a := cfg.HostAddress("ghost"); a != "ghost" {
+		t.Errorf("HostAddress = %q, want ghost", a)
+	}
+}
+
+func TestExpandTilde(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	cases := []struct{ in, want string }{
+		{"/abs/path", "/abs/path"},
+		{"~", home},
+		{"~/docs", filepath.Join(home, "docs")},
+		{"relative/path", "relative/path"},
+		{"not~tilde", "not~tilde"},
+	}
+	for _, c := range cases {
+		if got := expandTilde(c.in); got != c.want {
+			t.Errorf("expandTilde(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestDir_RespectsVVHome(t *testing.T) {
 	t.Setenv("VV_HOME", "/custom/vevault")
 	t.Setenv("VEVAULT_PROFILE", "should-be-ignored")

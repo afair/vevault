@@ -116,8 +116,10 @@ These symlinks are tracked in `config.toml` so `vv vault delete` can clean them 
 [core]
 # Which host is the central node (must match an SSH alias in ~/.ssh/config)
 central_host = "homeserver"
+# Optional: how to reach central (Tailscale IP, VPN, etc.)
+central_address = "100.64.0.5"
 
-# Where vault data lives on this host
+# Where vault data lives on this host. ~ expands to user home.
 vaults_dir = "~/.local/share/vevault/vaults"
 
 # A vault definition
@@ -143,8 +145,12 @@ encryption  = false
 # Which remote hosts subscribe to which vaults
 # Only relevant on the central node
 [[subscriptions]]
-host  = "laptop"             # SSH alias
-vaults = ["personal", "work"]
+host    = "laptop"             # SSH alias
+address = "laptop.tailnet.ts.net"  # optional: how to reach this host
+vaults  = ["personal", "work"]
+
+[subscriptions.paths]
+personal = "/Users/allen/vaults/personal"  # optional: per-host path override
 
 [[subscriptions]]
 host  = "workstation"
@@ -181,10 +187,33 @@ A host is any machine running `vv`. It is identified by its SSH alias as defined
 ```
 Host {
     Alias       string          // e.g. "laptop", "homeserver"
+    Address     string          // optional: how to reach (Tailscale IP, VPN, etc.)
     IsCentral   bool            // true if this is the central node
     Vaults      []string        // Vault names this host is subscribed to
+    Paths       map[string]string // optional: per-vault path overrides for this host
 }
 ```
+
+### Subscription
+
+A subscription binds a host to a vault. Stored in central's config, synced to all hosts.
+
+```
+Subscription {
+    Host    string              // Host alias
+    Address string              // optional: how to reach this host from central
+    Vaults  []string            // Vault names
+    Paths   map[string]string   // optional: per-vault remote path overrides
+}
+```
+
+The `Paths` map solves cross-platform path differences (e.g. Linux `/home/allen/` vs
+macOS `/Users/allen/`). When set, `RemoteVaultPath()` returns the override for rclone
+SFTP commands. When absent, the local vault path is used for both sides.
+
+`Address` solves multi-network reachability. A laptop might be `macbook.local` on LAN
+but `macbook.tailnet.ts.net` on Tailscale. Central uses `Address` for SFTP; remote
+clients use `central_address` for SSH delegation.
 
 ### SyncState
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -22,8 +23,9 @@ type Config struct {
 
 // CoreConfig holds global settings.
 type CoreConfig struct {
-	CentralHost string `toml:"central_host"`
-	VaultsDir   string `toml:"vaults_dir"`
+	CentralHost    string `toml:"central_host"`
+	CentralAddress string `toml:"central_address,omitempty"` // How to reach central (SSH/rclone). Falls back to central_host.
+	VaultsDir      string `toml:"vaults_dir"`
 }
 
 // VaultConfig defines a single vault.
@@ -36,8 +38,10 @@ type VaultConfig struct {
 
 // Subscription maps a remote host to the vaults it subscribes to.
 type Subscription struct {
-	Host   string   `toml:"host"`
-	Vaults []string `toml:"vaults"`
+	Host    string            `toml:"host"`
+	Address string            `toml:"address,omitempty"` // How to reach this host (SSH/rclone). Falls back to Host.
+	Vaults  []string          `toml:"vaults"`
+	Paths   map[string]string `toml:"paths,omitempty"` // Per-vault path overrides for this host
 }
 
 // Dir returns the vevault data directory.
@@ -167,12 +171,16 @@ func (c *Config) Vault(name string) *VaultConfig {
 
 // VaultPath returns the absolute filesystem path for a vault, resolving
 // the per-vault override or falling back to vaults_dir/<name>.
+// Paths starting with ~ are expanded relative to the current user's home.
 func (c *Config) VaultPath(name string) string {
 	v := c.Vault(name)
+	var p string
 	if v != nil && v.Path != "" {
-		return v.Path
+		p = v.Path
+	} else {
+		p = filepath.Join(c.Core.VaultsDir, name)
 	}
-	return filepath.Join(c.Core.VaultsDir, name)
+	return expandTilde(p)
 }
 
 // SubscribedVaults returns the vault names subscribed by the given host.
@@ -183,4 +191,54 @@ func (c *Config) SubscribedVaults(host string) []string {
 		}
 	}
 	return nil
+}
+
+// RemoteVaultPath returns the filesystem path for a vault on a specific
+// remote host. Checks the subscription's paths override first, then falls
+// back to the local vault path (suitable when hosts have the same layout).
+func (c *Config) RemoteVaultPath(vaultName, host string) string {
+	for _, s := range c.Subscriptions {
+		if s.Host == host && s.Paths != nil {
+			if p, ok := s.Paths[vaultName]; ok && p != "" {
+				return p
+			}
+		}
+	}
+	return c.VaultPath(vaultName)
+}
+
+// CentralAddress returns the address to reach the central node.
+// Falls back to CentralHost if CentralAddress is not set.
+func (c *Config) CentralAddress() string {
+	if c.Core.CentralAddress != "" {
+		return c.Core.CentralAddress
+	}
+	return c.Core.CentralHost
+}
+
+// HostAddress returns the address to reach a subscribed host.
+// Falls back to the host identity if no address override is set.
+func (c *Config) HostAddress(host string) string {
+	for _, s := range c.Subscriptions {
+		if s.Host == host {
+			if s.Address != "" {
+				return s.Address
+			}
+			return s.Host
+		}
+	}
+	return host
+}
+
+// expandTilde replaces a leading ~ with the user's home directory.
+func expandTilde(path string) string {
+	if path == "~" {
+		home, _ := os.UserHomeDir()
+		return home
+	}
+	if strings.HasPrefix(path, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, path[2:])
+	}
+	return path
 }

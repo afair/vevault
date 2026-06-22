@@ -132,8 +132,9 @@ vv updates <host> [<vault>]       Central-only: sync with host [-n to skip fan-o
 
 ```toml
 [core]
-central_host = "homeserver"
-vaults_dir   = "~/.local/share/vevault/vaults"
+central_host    = "homeserver"
+central_address = "100.64.0.5"     # optional: Tailscale/VPN IP
+vaults_dir      = "~/vaults"        # ~ expands per host
 
 [[vaults]]
 name      = "personal"
@@ -141,8 +142,12 @@ symlinks  = ["~/Documents/Personal"]
 encryption = false   # v1.1
 
 [[subscriptions]]
-host   = "laptop"
-vaults = ["personal", "work"]
+host    = "laptop"
+address = "laptop.tailnet.ts.net"  # optional: how to reach this host
+vaults  = ["personal", "work"]
+
+[subscriptions.paths]
+personal = "/Users/allen/vaults/personal"  # optional: macOS path override
 ```
 
 ## License

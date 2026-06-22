@@ -144,18 +144,19 @@ func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool) er
 }
 
 // bisyncVault runs rclone bisync between central and a remote host for a
-// single vault.
+// single vault. Uses RemoteVaultPath for the remote side, falling back to
+// the local path when no per-host override is set.
 func bisyncVault(cfg *config.Config, vaultName, host string) error {
 	localPath := cfg.VaultPath(vaultName)
-	remotePath := cfg.VaultPath(vaultName) // Same structure on remote.
+	remotePath := cfg.RemoteVaultPath(vaultName, host)
 
 	// TODO: Derive SFTP params from ~/.ssh/config for <host>.
 	// For now, use a placeholder that assumes the host alias works as-is.
 	args := []string{
 		"bisync",
 		localPath,
-		fmt.Sprintf(":sftp:%s:%s", host, remotePath),
-		"--sftp-host=" + host,
+		fmt.Sprintf(":sftp:%s:%s", cfg.HostAddress(host), remotePath),
+		"--sftp-host=" + cfg.HostAddress(host),
 		"--create-empty-src-dirs",
 		// "--resync",  // Only on first sync or after interruption.
 	}
@@ -189,20 +190,21 @@ func vaultList(cfg *config.Config, host, vaultName string) []string {
 // with an optional --no-propagate flag for pull-only syncs.
 func delegateToCentral(cfg *config.Config, vaultName string, pull bool) error {
 	central := cfg.Core.CentralHost
+	address := cfg.CentralAddress()
 	if central == "" {
 		return fmt.Errorf("central_host not configured; set it in %s", config.Path())
 	}
 
 	myHost := hostname()
-	args := []string{central, "vv", "updates", myHost}
+	args := []string{address, "vv", "updates", myHost}
 	if vaultName != "" {
 		args = append(args, vaultName)
 	}
 	if pull {
 		args = append(args, "--no-propagate")
-		fmt.Printf("Delegating pull-only sync to central (%s)...\n", central)
+		fmt.Printf("Delegating pull-only sync to central (%s)...\n", address)
 	} else {
-		fmt.Printf("Delegating to central (%s)...\n", central)
+		fmt.Printf("Delegating to central (%s)...\n", address)
 	}
 
 	cmd := exec.Command("ssh", args...)
@@ -218,7 +220,7 @@ func delegateConfigSync(cfg *config.Config) error {
 	}
 
 	fmt.Printf("Delegating config sync to central (%s)...\n", central)
-	cmd := exec.Command("ssh", central, "vv", "sync", "--config")
+	cmd := exec.Command("ssh", cfg.CentralAddress(), "vv", "sync", "--config")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

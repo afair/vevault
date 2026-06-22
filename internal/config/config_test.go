@@ -261,14 +261,25 @@ func TestSubscribedVaults(t *testing.T) {
 
 func TestDir_RespectsVVHome(t *testing.T) {
 	t.Setenv("VV_HOME", "/custom/vevault")
+	t.Setenv("VEVAULT_PROFILE", "should-be-ignored")
 	if d := Dir(); d != "/custom/vevault" {
 		t.Errorf("Dir() = %q, want /custom/vevault", d)
 	}
 }
 
-func TestDir_FallsBack(t *testing.T) {
-	// Unset VV_HOME to test fallback.
+func TestDir_RespectsProfile(t *testing.T) {
 	os.Unsetenv("VV_HOME")
+	t.Setenv("VEVAULT_PROFILE", "work")
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, ".local", "share", "work")
+	if d := Dir(); d != expected {
+		t.Errorf("Dir() = %q, want %q", d, expected)
+	}
+}
+
+func TestDir_FallsBack(t *testing.T) {
+	os.Unsetenv("VV_HOME")
+	os.Unsetenv("VEVAULT_PROFILE")
 	d := Dir()
 	home, _ := os.UserHomeDir()
 	expected := filepath.Join(home, ".local", "share", "vevault")

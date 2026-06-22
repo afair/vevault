@@ -13,8 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewCmd returns the "sync" and "updates" subcommands.
+// NewCmd returns the "sync" subcommand.
 func NewCmd(cfg *config.Config) *cobra.Command {
+	var pull bool
+
 	cmd := &cobra.Command{
 		Use:   "sync [<vault>]",
 		Short: "Synchronize vaults with central node",
@@ -22,6 +24,9 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 
 On a non-central host, this delegates to central over SSH:
     ssh <central> vv updates <this-host> [<vault>]
+
+Use --pull on a non-central host to catch up without propagating:
+    vv sync --pull          # Pull latest from central, skip fan-out
 
 On the central node, this performs a 2-way rclone bisync with the
 requesting host, then propagates changes to other subscribers.`,
@@ -33,11 +38,13 @@ requesting host, then propagates changes to other subscribers.`,
 			}
 
 			if !cfg.IsCentral() {
-				return delegateToCentral(cfg, vaultName)
+				return delegateToCentral(cfg, vaultName, pull)
 			}
-			return runUpdates(cfg, hostname(), vaultName)
+			return runUpdates(cfg, hostname(), vaultName, false)
 		},
 	}
+
+	cmd.Flags().BoolVar(&pull, "pull", false, "Pull latest from central without propagating to other hosts")
 
 	cmd.AddCommand(newConfigSyncCmd(cfg))
 
@@ -48,11 +55,15 @@ requesting host, then propagates changes to other subscribers.`,
 // main.go alongside "sync". It is intended to be invoked on central,
 // either directly or via SSH from a non-central host.
 func NewUpdatesCmd(cfg *config.Config) *cobra.Command {
-	return &cobra.Command{
+	var noPropagate bool
+
+	cmd := &cobra.Command{
 		Use:   "updates <host> [<vault>]",
 		Short: "Run 2-way sync with a host and propagate to subscribers (central-only)",
 		Long: `Central-only command. Runs rclone bisync with the given host,
 then propagates changes to all other subscribers of the affected vaults.
+
+Use --no-propagate (-n) to skip fan-out and only sync with the host.
 
 This is the target of "vv sync" on non-central hosts.`,
 		Args: cobra.RangeArgs(1, 2),
@@ -66,9 +77,13 @@ This is the target of "vv sync" on non-central hosts.`,
 			if !cfg.IsCentral() {
 				return fmt.Errorf("updates must run on the central node")
 			}
-			return runUpdates(cfg, host, vaultName)
+			return runUpdates(cfg, host, vaultName, noPropagate)
 		},
 	}
+
+	cmd.Flags().BoolVarP(&noPropagate, "no-propagate", "n", false, "Skip propagating changes to other subscribers")
+
+	return cmd
 }
 
 // newConfigSyncCmd is "vv sync --config": pushes config to all hosts.
@@ -98,14 +113,18 @@ func newConfigSyncCmd(cfg *config.Config) *cobra.Command {
 // --- sync logic -------------------------------------------------------
 
 // runUpdates performs the core sync: bisync central with host, then
-// propagate to all other subscribers.
-func runUpdates(cfg *config.Config, host, vaultName string) error {
+// optionally propagate to all other subscribers.
+func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool) error {
 	vaults := vaultList(cfg, host, vaultName)
 
 	for _, v := range vaults {
 		fmt.Printf("Syncing vault %q with %s...\n", v, host)
 		if err := bisyncVault(cfg, v, host); err != nil {
 			return fmt.Errorf("bisync %q with %s: %w", v, host, err)
+		}
+
+		if noPropagate {
+			continue
 		}
 
 		// Propagate to other subscribers.
@@ -166,8 +185,9 @@ func vaultList(cfg *config.Config, host, vaultName string) []string {
 
 // --- delegation -------------------------------------------------------
 
-// delegateToCentral runs "ssh <central> vv updates <this-host> [<vault>]".
-func delegateToCentral(cfg *config.Config, vaultName string) error {
+// delegateToCentral runs "ssh <central> vv updates <this-host> [<vault>]"
+// with an optional --no-propagate flag for pull-only syncs.
+func delegateToCentral(cfg *config.Config, vaultName string, pull bool) error {
 	central := cfg.Core.CentralHost
 	if central == "" {
 		return fmt.Errorf("central_host not configured; set it in %s", config.Path())
@@ -178,8 +198,13 @@ func delegateToCentral(cfg *config.Config, vaultName string) error {
 	if vaultName != "" {
 		args = append(args, vaultName)
 	}
+	if pull {
+		args = append(args, "--no-propagate")
+		fmt.Printf("Delegating pull-only sync to central (%s)...\n", central)
+	} else {
+		fmt.Printf("Delegating to central (%s)...\n", central)
+	}
 
-	fmt.Printf("Delegating to central (%s)...\n", central)
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

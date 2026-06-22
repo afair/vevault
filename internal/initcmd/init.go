@@ -46,17 +46,23 @@ func runInit(cfg *config.Config, central, vaultList string, force bool) error {
 	dir := config.Dir()
 	configPath := config.Path()
 
+	profile := os.Getenv("VEVAULT_PROFILE")
+	profileLabel := ""
+	if profile != "" && profile != "vevault" && os.Getenv("VV_HOME") == "" {
+		profileLabel = fmt.Sprintf(" [profile %q]", profile)
+	}
+
 	// Check if already initialized.
 	if _, err := os.Stat(configPath); err == nil && !force {
-		fmt.Printf("vevault is already initialized at %s\n", dir)
+		fmt.Printf("Vevault is already initialized at %s%s\n", dir, profileLabel)
 		fmt.Println("Use --force to overwrite the existing configuration.")
 		return nil
 	}
 
 	if force {
-		fmt.Printf("Re-initializing vevault at %s...\n", dir)
+		fmt.Printf("Re-initializing vevault at %s%s...\n", dir, profileLabel)
 	} else {
-		fmt.Printf("Initializing vevault at %s...\n", dir)
+		fmt.Printf("Initializing vevault at %s%s...\n", dir, profileLabel)
 	}
 
 	// Create directory structure.
@@ -127,13 +133,18 @@ func printNextSteps(cfg *config.Config) {
 	if cfg.Core.CentralHost != "" {
 		fmt.Println("  1. Ensure this host can SSH to the central node:")
 		fmt.Printf("       ssh %s echo ok\n", cfg.Core.CentralHost)
-		fmt.Println("  2. On the central node, subscribe this host to vaults:")
+		fmt.Println("  2. Subscribe this host to vaults from here:")
+		fmt.Println("       vv subscribe <vault> --symlink ~/<vault>")
+		fmt.Println()
+		fmt.Println("   Or from the central node:")
 		fmt.Printf("       ssh %s vv subscribe <vault> --host $(hostname)\n", cfg.Core.CentralHost)
 	} else {
 		fmt.Println("  1. Create your first vault:")
 		fmt.Println("       vv vault create personal")
 		fmt.Println("  2. Subscribe remote hosts to vaults:")
 		fmt.Println("       vv subscribe personal --host laptop")
+		fmt.Println("  3. Sync with a host:")
+		fmt.Println("       vv updates laptop")
 	}
 	fmt.Println()
 }

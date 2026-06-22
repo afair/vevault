@@ -2,6 +2,9 @@
 
 Personal file vault management — encrypt, sync, and back up your files across multiple hosts.
 
+A self-hosted replacement for Dropbox, Google Drive, Syncthing, and Nextcloud.
+Run it over SSH with the tools you already have.
+
 **`vv`** is a single static binary. No daemon, no open ports. All communication runs over SSH, all sync uses `rclone bisync`, and all backups use `restic`. Central node orchestrates; other hosts subscribe.
 
 ## Quick start
@@ -18,43 +21,64 @@ sudo make install        # → /usr/local/bin/vv
 
 Prebuilt binaries coming soon.
 
-### Initialize
+### Central server setup
+
+On your always-on server, NAS, or home server:
 
 ```bash
-# On your central node (always-on server, NAS, home server):
 vv init
+vv vault create personal
+vv vault create work --path /mnt/data/work
 
-# On each other host:
-vv init --central homeserver
+# Subscribe other hosts — they'll be populated on next sync
+vv subscribe personal --host laptop --host workstation
+vv subscribe work --host laptop
 ```
 
 This creates `~/.local/share/vevault/` with the config, vault storage, and key material.
 
-### Create your first vault
+### Remote client setup
+
+On each laptop, desktop, or other host:
 
 ```bash
-vv vault create personal
-vv vault create work --path /mnt/data/work    # Vaults can live anywhere
-vv vault create dotfiles --symlink ~/dotfiles
+vv init --central homeserver
+
+# Subscribe this host to vaults — data is pulled immediately
+vv subscribe personal --symlink ~/Documents/Personal
+vv subscribe work
 ```
 
-### Subscribe hosts
+Non-central hosts delegate all sync to central via SSH. No rclone needed here.
 
-On the central node, subscribe other hosts to vaults:
+### Profiles
+
+Run independent vault sets with `--profile` or `VEVAULT_PROFILE`:
 
 ```bash
-vv subscribe personal --host laptop
-vv subscribe work --host laptop --host workstation
+vv --profile work init --central office-server
+vv --profile media init
+VEVAULT_PROFILE=work vv vault list
 ```
+
+Each profile lives in `~/.local/share/<name>/`. The default profile is `vevault`.
 
 ### Sync
 
 ```bash
-vv sync                 # Tell central "I have updates" — central pulls, then propagates
-vv sync personal        # Sync a specific vault
+# On any host — tell central "I have updates"
+vv sync
+vv sync personal
+
+# Catch up before going offline (skip propagation to other hosts)
+vv sync --pull
 ```
 
-On a non-central host, `vv sync` delegates to central via SSH. All sync logic runs on central.
+On central, target a specific host without fan-out:
+
+```bash
+vv updates laptop personal -n
+```
 
 ### Coming in v1.1
 
@@ -71,6 +95,9 @@ laptop$ vv sync personal
 homeserver$ vv updates laptop personal
   → rclone bisync central ↔ laptop       # 2-way sync
   → rclone bisync central ↔ workstation  # propagate to subscribers
+
+homeserver$ vv updates laptop -n         # Sync only, no propagation
+laptop$    vv sync --pull                # Catch-up before going offline
 ```
 
 - **Two-way sync** with conflict detection — if a file is modified on both sides, both versions are preserved as `.conflict1` / `.conflict2`.
@@ -80,13 +107,16 @@ homeserver$ vv updates laptop personal
 ## Commands
 
 ```
-vv init                        Bootstrap vevault on this host
-vv vault create <name>         Create a new vault
-vv vault delete <name>         Remove a vault
-vv vault list                  List all vaults
-vv vault info <name>           Show vault details
-vv sync [<vault>]              Sync with central node
-vv updates <host> [<vault>]    Central-only: sync with host + propagate
+vv init                           Bootstrap vevault on this host
+vv --profile <name> init          Initialize a named profile
+vv vault create <name>            Create a new vault
+vv vault delete <name>            Remove a vault
+vv vault list                     List all vaults
+vv vault info <name>              Show vault details
+vv subscribe <vault>              Subscribe hosts to a vault (--host on central)
+vv unsubscribe <vault>            Remove a subscription (--purge to delete data)
+vv sync [<vault>]                 Sync with central node (--pull for catch-up)
+vv updates <host> [<vault>]       Central-only: sync with host [-n to skip fan-out]
 ```
 
 ## Requirements

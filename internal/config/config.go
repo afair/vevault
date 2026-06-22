@@ -40,14 +40,22 @@ type Subscription struct {
 	Vaults []string `toml:"vaults"`
 }
 
-// Dir returns the vevault data directory (~/.local/share/vevault).
-// Respects VV_HOME if set.
+// Dir returns the vevault data directory.
+//
+// Resolution order:
+//  1. VV_HOME env var (absolute path override, e.g. for testing)
+//  2. VEVAULT_PROFILE env var → ~/.local/share/<profile>/
+//  3. Default → ~/.local/share/vevault/
 func Dir() string {
 	if d := os.Getenv("VV_HOME"); d != "" {
 		return d
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "vevault")
+	profile := os.Getenv("VEVAULT_PROFILE")
+	if profile == "" {
+		profile = "vevault"
+	}
+	return filepath.Join(home, ".local", "share", profile)
 }
 
 // Path returns the full path to config.toml inside Dir().

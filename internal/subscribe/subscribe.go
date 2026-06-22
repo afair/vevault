@@ -18,6 +18,7 @@ func NewSubscribeCmd(cfg *config.Config) *cobra.Command {
 		hosts   []string
 		symlink string
 		address string
+		vpath   string
 	)
 
 	cmd := &cobra.Command{
@@ -36,7 +37,7 @@ On a non-central host, subscribe this host (delegates to central via SSH):
 			vaultName := args[0]
 
 			if cfg.IsCentral() {
-				return subscribeOnCentral(cfg, vaultName, hosts, address)
+				return subscribeOnCentral(cfg, vaultName, hosts, address, vpath)
 			}
 			return subscribeFromRemote(cfg, vaultName, symlink, address)
 		},
@@ -45,6 +46,7 @@ On a non-central host, subscribe this host (delegates to central via SSH):
 	cmd.Flags().StringArrayVar(&hosts, "host", nil, "Hosts to subscribe (central-only, repeatable)")
 	cmd.Flags().StringVar(&symlink, "symlink", "", "Create a symlink at this path after subscribing (remote only)")
 	cmd.Flags().StringVar(&address, "address", "", "How to reach this host (Tailscale name, IP, etc.)")
+	cmd.Flags().StringVar(&vpath, "path", "", "Vault path on the remote host (auto-detected from remote)")
 
 	return cmd
 }
@@ -85,7 +87,7 @@ On a non-central host, unsubscribe this host (delegates via SSH):
 
 // --- central-side logic -----------------------------------------------
 
-func subscribeOnCentral(cfg *config.Config, vaultName string, hosts []string, address string) error {
+func subscribeOnCentral(cfg *config.Config, vaultName string, hosts []string, address, vpath string) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("--host is required when running on central")
 	}
@@ -100,7 +102,7 @@ func subscribeOnCentral(cfg *config.Config, vaultName string, hosts []string, ad
 		if h == "" {
 			continue
 		}
-		added, err := addSubscription(cfg, vaultName, h, address)
+		added, err := addSubscription(cfg, vaultName, h, address, vpath)
 		if err != nil {
 			return err
 		}
@@ -177,6 +179,9 @@ func subscribeFromRemote(cfg *config.Config, vaultName, symlink, address string)
 	}
 
 	myHost, _ := os.Hostname()
+	if address != "" {
+		myHost = address // Use --address value as the host identity.
+	}
 
 	fmt.Printf("Subscribing this host (%s) to vault %q via %s...\n", myHost, vaultName, central)
 
@@ -185,6 +190,9 @@ func subscribeFromRemote(cfg *config.Config, vaultName, symlink, address string)
 	if address != "" {
 		args = append(args, "--address", address)
 	}
+	// Pass the remote vault path so central can store it for this host.
+	remoteVaultPath := cfg.VaultPath(vaultName)
+	args = append(args, "--path", remoteVaultPath)
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -208,6 +216,10 @@ func subscribeFromRemote(cfg *config.Config, vaultName, symlink, address string)
 			Path:     cfg.VaultPath(vaultName),
 			Symlinks: symlinks(symlink),
 		})
+		// Store the host identity for future sync delegation.
+		if myHost != cfg.Core.LocalHost && cfg.Core.LocalHost == "" {
+			cfg.Core.LocalHost = myHost
+		}
 		if err := cfg.Save(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: saving local config: %v\n", err)
 		}
@@ -222,7 +234,7 @@ func unsubscribeFromRemote(cfg *config.Config, vaultName string, purge bool) err
 		return fmt.Errorf("central_host not set")
 	}
 
-	myHost, _ := os.Hostname()
+	myHost := cfg.LocalHostName()
 
 	// 1. Delegate unsubscribe to central (best-effort).
 	args := []string{cfg.CentralAddress(), "vv", "unsubscribe", vaultName, "--host", myHost}
@@ -274,13 +286,20 @@ func purgeLocalVault(cfg *config.Config, vaultName string) {
 
 // --- helpers ----------------------------------------------------------
 
-func addSubscription(cfg *config.Config, vaultName, host, address string) (bool, error) {
+func addSubscription(cfg *config.Config, vaultName, host, address, vpath string) (bool, error) {
 	// Find existing subscription for this host or create one.
 	for i := range cfg.Subscriptions {
 		if cfg.Subscriptions[i].Host == host {
 			// Update address if provided.
 			if address != "" {
 				cfg.Subscriptions[i].Address = address
+			}
+			// Update path override if provided.
+			if vpath != "" {
+				if cfg.Subscriptions[i].Paths == nil {
+					cfg.Subscriptions[i].Paths = make(map[string]string)
+				}
+				cfg.Subscriptions[i].Paths[vaultName] = vpath
 			}
 			// Check if already subscribed.
 			for _, v := range cfg.Subscriptions[i].Vaults {
@@ -294,11 +313,15 @@ func addSubscription(cfg *config.Config, vaultName, host, address string) (bool,
 	}
 
 	// New subscription entry.
-	cfg.Subscriptions = append(cfg.Subscriptions, config.Subscription{
+	sub := config.Subscription{
 		Host:    host,
 		Address: address,
 		Vaults:  []string{vaultName},
-	})
+	}
+	if vpath != "" {
+		sub.Paths = map[string]string{vaultName: vpath}
+	}
+	cfg.Subscriptions = append(cfg.Subscriptions, sub)
 	return true, nil
 }
 
@@ -311,8 +334,7 @@ func execBisync(cfg *config.Config, vaultName, host string, resync bool) error {
 	args := []string{
 		"bisync",
 		localPath,
-		fmt.Sprintf(":sftp:%s:%s", cfg.HostAddress(host), remotePath),
-		"--sftp-host=" + cfg.HostAddress(host),
+		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
 		"--create-empty-src-dirs",
 	}
 	if resync {

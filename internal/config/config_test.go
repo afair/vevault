@@ -365,6 +365,23 @@ func TestHostAddress_Unknown(t *testing.T) {
 	}
 }
 
+func TestLocalHostName_Configured(t *testing.T) {
+	cfg := Default()
+	cfg.Core.LocalHost = "air"
+	if h := cfg.LocalHostName(); h != "air" {
+		t.Errorf("LocalHostName = %q, want air", h)
+	}
+}
+
+func TestLocalHostName_Fallback(t *testing.T) {
+	cfg := Default()
+	h := cfg.LocalHostName()
+	hostname, _ := os.Hostname()
+	if h != hostname {
+		t.Errorf("LocalHostName = %q, want %q", h, hostname)
+	}
+}
+
 func TestExpandTilde(t *testing.T) {
 	home, _ := os.UserHomeDir()
 

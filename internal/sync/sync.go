@@ -40,7 +40,7 @@ requesting host, then propagates changes to other subscribers.`,
 			if !cfg.IsCentral() {
 				return delegateToCentral(cfg, vaultName, pull)
 			}
-			return runUpdates(cfg, hostname(), vaultName, false)
+			return runUpdates(cfg, cfg.LocalHostName(), vaultName, false)
 		},
 	}
 
@@ -155,8 +155,7 @@ func bisyncVault(cfg *config.Config, vaultName, host string) error {
 	args := []string{
 		"bisync",
 		localPath,
-		fmt.Sprintf(":sftp:%s:%s", cfg.HostAddress(host), remotePath),
-		"--sftp-host=" + cfg.HostAddress(host),
+		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
 		"--create-empty-src-dirs",
 		// "--resync",  // Only on first sync or after interruption.
 	}
@@ -195,7 +194,11 @@ func delegateToCentral(cfg *config.Config, vaultName string, pull bool) error {
 		return fmt.Errorf("central_host not configured; set it in %s", config.Path())
 	}
 
-	myHost := hostname()
+	myHost := cfg.LocalHostName()
+	if myHost == "" {
+		myHost, _ = os.Hostname()
+	}
+
 	args := []string{address, "vv", "updates", myHost}
 	if vaultName != "" {
 		args = append(args, vaultName)

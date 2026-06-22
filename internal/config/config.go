@@ -25,6 +25,7 @@ type Config struct {
 type CoreConfig struct {
 	CentralHost    string `toml:"central_host"`
 	CentralAddress string `toml:"central_address,omitempty"` // How to reach central (SSH/rclone). Falls back to central_host.
+	LocalHost      string `toml:"local_host,omitempty"`      // This host's identity on the vault network. Falls back to os.Hostname().
 	VaultsDir      string `toml:"vaults_dir"`
 }
 
@@ -228,6 +229,16 @@ func (c *Config) HostAddress(host string) string {
 		}
 	}
 	return host
+}
+
+// LocalHostName returns the configured local host identity, or the system
+// hostname as a fallback.
+func (c *Config) LocalHostName() string {
+	if c.Core.LocalHost != "" {
+		return c.Core.LocalHost
+	}
+	h, _ := os.Hostname()
+	return h
 }
 
 // expandTilde replaces a leading ~ with the user's home directory.

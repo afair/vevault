@@ -29,8 +29,8 @@ On a non-central host, this delegates to central over SSH:
 Use --pull on a non-central host to catch up without propagating:
     vv sync --pull          # Pull latest from central, skip fan-out
 
-On the central node, this performs a 2-way rclone bisync with the
-requesting host, then propagates changes to other subscribers.`,
+On the central node, this syncs all vaults with all subscribed hosts.
+Use 'vv updates <host>' to target a single host.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			vaultName := ""
@@ -41,7 +41,8 @@ requesting host, then propagates changes to other subscribers.`,
 			if !cfg.IsCentral() {
 				return delegateToCentral(cfg, vaultName, pull)
 			}
-			return runUpdates(cfg, cfg.LocalHostName(), vaultName, false)
+			// On central, sync with all subscribed hosts.
+			return syncAll(cfg, vaultName)
 		},
 	}
 
@@ -112,6 +113,39 @@ func newConfigSyncCmd(cfg *config.Config) *cobra.Command {
 }
 
 // --- sync logic -------------------------------------------------------
+
+// syncAll runs updates for every subscribed host. Used when vv sync is
+// invoked on central without targeting a specific host.
+func syncAll(cfg *config.Config, vaultName string) error {
+	if len(cfg.Subscriptions) == 0 {
+		fmt.Println("No subscribed hosts.")
+		fmt.Println("Hint: subscribe a remote host with 'vv subscribe <vault> --host <host>'")
+		return nil
+	}
+
+	// Collect unique hosts from subscriptions.
+	seen := map[string]bool{}
+	var hosts []string
+	for _, s := range cfg.Subscriptions {
+		if !seen[s.Host] {
+			seen[s.Host] = true
+			hosts = append(hosts, s.Host)
+		}
+	}
+
+	fmt.Printf("Syncing with %d host(s)...\n", len(hosts))
+
+	for _, host := range hosts {
+		fmt.Printf("\n── %s ──\n", host)
+		// Don't propagate — each host gets a direct bisync in its own turn.
+		if err := runUpdates(cfg, host, vaultName, true); err != nil {
+			return fmt.Errorf("sync with %s: %w", host, err)
+		}
+	}
+
+	fmt.Printf("\nAll hosts synced (%d total).\n", len(hosts))
+	return nil
+}
 
 // runUpdates performs the core sync: bisync central with host, then
 // optionally propagate to all other subscribers.

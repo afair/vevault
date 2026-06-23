@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"vevault/internal/config"
 
@@ -117,11 +118,20 @@ func newConfigSyncCmd(cfg *config.Config) *cobra.Command {
 func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool) error {
 	vaults := vaultList(cfg, host, vaultName)
 
+	if len(vaults) == 0 {
+		fmt.Printf("No vaults to sync for host %q.\n", host)
+		fmt.Println("Hint: subscribe to a vault first with 'vv subscribe <vault>'")
+		return nil
+	}
+
 	for _, v := range vaults {
 		fmt.Printf("Syncing vault %q with %s...\n", v, host)
+		fmt.Printf("  central: %s\n", cfg.VaultPath(v))
+		fmt.Printf("  remote:  %s @ %s\n", cfg.RemoteVaultPath(v, host), cfg.HostAddress(host))
 		if err := bisyncVault(cfg, v, host); err != nil {
 			return fmt.Errorf("bisync %q with %s: %w", v, host, err)
 		}
+		fmt.Printf("  ✓ %s ↔ %s synced\n\n", v, host)
 
 		if noPropagate {
 			continue
@@ -140,6 +150,10 @@ func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool) er
 		}
 	}
 
+	fmt.Printf("\nSync complete for host %q (%d vaults).\n", host, len(vaults))
+	if !noPropagate && len(cfg.Subscriptions) > 1 {
+		fmt.Println("Propagation to other subscribers complete.")
+	}
 	return nil
 }
 
@@ -150,6 +164,11 @@ func bisyncVault(cfg *config.Config, vaultName, host string) error {
 	localPath := cfg.VaultPath(vaultName)
 	remotePath := cfg.RemoteVaultPath(vaultName, host)
 
+	// Check rclone is available.
+	if _, err := exec.LookPath("rclone"); err != nil {
+		return fmt.Errorf("rclone not found in PATH — install rclone (https://rclone.org) to sync vaults")
+	}
+
 	// TODO: Derive SFTP params from ~/.ssh/config for <host>.
 	// For now, use a placeholder that assumes the host alias works as-is.
 	args := []string{
@@ -157,8 +176,11 @@ func bisyncVault(cfg *config.Config, vaultName, host string) error {
 		localPath,
 		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
 		"--create-empty-src-dirs",
+		"--force",
 		// "--resync",  // Only on first sync or after interruption.
 	}
+
+	fmt.Printf("  rclone %s\n", strings.Join(args, " "))
 
 	cmd := exec.Command("rclone", args...)
 	cmd.Stdout = os.Stdout
@@ -209,6 +231,7 @@ func delegateToCentral(cfg *config.Config, vaultName string, pull bool) error {
 	} else {
 		fmt.Printf("Delegating to central (%s)...\n", address)
 	}
+	fmt.Printf("  → ssh %s\n", strings.Join(args, " "))
 
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdout = os.Stdout

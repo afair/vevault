@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"vevault/internal/config"
 
@@ -347,6 +349,32 @@ func execBisync(cfg *config.Config, vaultName, host string, resync bool) error {
 	if resync {
 		args = append(args, "--resync")
 	}
+	args = append(args,
+		"--log-level", "ERROR",
+		"--sftp-known-hosts",
+		"--exclude", ".DS_Store",
+		"--exclude", "*.lck",
+		"--exclude", "*.lck-*",
+		"--exclude", "*.conflict1",
+		"--exclude", "*.conflict2",
+		"--exclude", "*~",
+		"--exclude", "*.swp",
+		"--exclude", ".~lock.*",
+		"--exclude", ".Trash/",
+		"--exclude", "node_modules/",
+		"--exclude", "__pycache__/",
+		"--exclude", ".venv/",
+		"--exclude", ".git/",
+		"--exclude", "target/",
+	)
+
+	// If a .vvignore file exists in the vault, pass it as a filter.
+	vvignore := filepath.Join(localPath, ".vvignore")
+	if _, err := os.Stat(vvignore); err == nil {
+		args = append(args, "--filter-from", vvignore)
+	}
+
+	fmt.Printf("  rclone %s\n", strings.Join(args, " "))
 
 	cmd := exec.Command("rclone", args...)
 	cmd.Stdout = os.Stdout

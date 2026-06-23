@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"vevault/internal/config"
@@ -198,9 +199,17 @@ func bisyncVault(cfg *config.Config, vaultName, host string) error {
 	localPath := cfg.VaultPath(vaultName)
 	remotePath := cfg.RemoteVaultPath(vaultName, host)
 
-	// Check rclone is available.
-	if _, err := exec.LookPath("rclone"); err != nil {
+	// Check rclone is available and >= 1.62 (required for bisync).
+	rclonePath, err := exec.LookPath("rclone")
+	if err != nil {
 		return fmt.Errorf("rclone not found in PATH — install rclone (https://rclone.org) to sync vaults")
+	}
+	// Quick version probe.
+	if out, err := exec.Command(rclonePath, "version", "--check").CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: rclone version check failed: %v\n", err)
+	} else {
+		verLine := strings.SplitN(string(out), "\n", 2)[0]
+		fmt.Fprintf(os.Stderr, "  rclone: %s\n", verLine)
 	}
 
 	// TODO: Derive SFTP params from ~/.ssh/config for <host>.
@@ -211,10 +220,31 @@ func bisyncVault(cfg *config.Config, vaultName, host string) error {
 		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
 		"--create-empty-src-dirs",
 		"--force",
-		// "--resync",  // Only on first sync or after interruption.
+		"--log-level", "ERROR",
+		"--sftp-known-hosts",
+		"--exclude", ".DS_Store",
+		"--exclude", "*.lck",
+		"--exclude", "*.lck-*",
+		"--exclude", "*.conflict1",
+		"--exclude", "*.conflict2",
+		"--exclude", "*~",
+		"--exclude", "*.swp",
+		"--exclude", ".~lock.*",
+		"--exclude", ".Trash/",
+		"--exclude", "node_modules/",
+		"--exclude", "__pycache__/",
+		"--exclude", ".venv/",
+		"--exclude", ".git/",
+		"--exclude", "target/",
 	}
 
 	fmt.Printf("  rclone %s\n", strings.Join(args, " "))
+
+	// If a .vvignore file exists in the vault, pass it as a filter.
+	vvignore := filepath.Join(localPath, ".vvignore")
+	if _, err := os.Stat(vvignore); err == nil {
+		args = append(args, "--filter-from", vvignore)
+	}
 
 	cmd := exec.Command("rclone", args...)
 	cmd.Stdout = os.Stdout

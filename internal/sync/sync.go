@@ -212,15 +212,10 @@ func bisyncVault(cfg *config.Config, vaultName, host string) error {
 		fmt.Fprintf(os.Stderr, "  rclone: %s\n", verLine)
 	}
 
-	// Build the SFTP remote spec with host key validation.
-	home, _ := os.UserHomeDir()
-	sftpSpec := fmt.Sprintf(":sftp,host=%s,known_hosts_file=%s/.ssh/known_hosts:%s",
-		cfg.HostAddress(host), home, remotePath)
-
 	args := []string{
 		"bisync",
 		localPath,
-		sftpSpec,
+		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
 		"--create-empty-src-dirs",
 		"--force",
 		"--log-level", "ERROR",

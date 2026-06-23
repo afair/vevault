@@ -339,11 +339,13 @@ func addSubscription(cfg *config.Config, vaultName, host, address, vpath string)
 func execBisync(cfg *config.Config, vaultName, host string, resync bool) error {
 	localPath := cfg.VaultPath(vaultName)
 	remotePath := cfg.RemoteVaultPath(vaultName, host)
+	home, _ := os.UserHomeDir()
 
 	args := []string{
 		"bisync",
 		localPath,
-		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
+		fmt.Sprintf(":sftp,host=%s,known_hosts_file=%s/.ssh/known_hosts:%s",
+			cfg.HostAddress(host), home, remotePath),
 		"--create-empty-src-dirs",
 	}
 	if resync {
@@ -351,7 +353,6 @@ func execBisync(cfg *config.Config, vaultName, host string, resync bool) error {
 	}
 	args = append(args,
 		"--log-level", "ERROR",
-		"--sftp-known-hosts",
 		"--exclude", ".DS_Store",
 		"--exclude", "*.lck",
 		"--exclude", "*.lck-*",

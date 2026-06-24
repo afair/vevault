@@ -85,17 +85,15 @@ vevault/
 ~/.local/share/vevault/
 ├── config.toml              # Main configuration
 ├── state.db                 # BoltDB: sync timestamps, file manifests
-├── vaults/                  # All vault data lives here
+├── vaults/                  # All vault data (plaintext or gocryptfs ciphertext)
 │   ├── personal/            #   One directory per vault
 │   ├── work/
 │   └── books/
-├── encrypted/               # Encrypted mirrors (v1.1)
-│   ├── personal/            #   gocryptfs-style encrypted tree
-│   └── work/
 ├── keys/                    # Encryption key material (v1.1)
-│   └── personal.age         #   One key per vault
+│   ├── personal             #   Vault key encrypted with master password
+│   └── .master.salt         #   Argon2id salt
 └── backups/                 # Backup config cache
-    └── personal.restic      #   Restic repo snapshots
+    └── personal.restic      #   Restic repo snapshot cache
 ```
 
 On vault creation or subscription, the user may request a symlink at an arbitrary path:

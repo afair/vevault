@@ -26,7 +26,7 @@ func TestInit_Fresh(t *testing.T) {
 	}
 
 	// Check directories exist.
-	for _, sub := range []string{"vaults", "keys", "encrypted", "backups"} {
+	for _, sub := range []string{"vaults", "keys", "backups"} {
 		p := filepath.Join(home, sub)
 		if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
 			t.Errorf("directory %s missing", sub)

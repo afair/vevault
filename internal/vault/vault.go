@@ -175,7 +175,7 @@ func newListCmd(cfg *config.Config) *cobra.Command {
 				vaultPath := cfg.VaultPath(v.Name)
 				size := dirSize(vaultPath)
 				status := "•"
-				if v.Encryption {
+				if v.Encryption.Enabled {
 					status = "🔒"
 				}
 				fmt.Printf("  %s %s  %s  (%s)\n", status, v.Name, formatBytes(size), vaultPath)
@@ -207,7 +207,7 @@ func newInfoCmd(cfg *config.Config) *cobra.Command {
 			fmt.Printf("Path:       %s\n", vaultPath)
 			fmt.Printf("Size:       %s\n", formatBytes(size))
 			fmt.Printf("Files:      %d\n", files)
-			fmt.Printf("Encrypted:  %v\n", v.Encryption)
+			fmt.Printf("Encrypted:  %v\n", v.Encryption.Enabled)
 			fmt.Printf("Symlinks:   %v\n", v.Symlinks)
 
 			// Show subscribed hosts (only meaningful on central).

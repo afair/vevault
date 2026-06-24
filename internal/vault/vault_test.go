@@ -227,7 +227,7 @@ func TestList_WithVaults(t *testing.T) {
 
 	cfg.Vaults = []config.VaultConfig{
 		{Name: "a", Path: "/tmp/a"},
-		{Name: "b", Path: "/tmp/b", Encryption: true},
+		{Name: "b", Path: "/tmp/b", Encryption: config.EncryptionConfig{Enabled: true}},
 	}
 
 	cmd := newListCmd(cfg)

@@ -66,10 +66,14 @@ func runInit(cfg *config.Config, central, vaultList string, force bool) error {
 	}
 
 	// Create directory structure.
+	//
+	// vaults/ - all vault data (plaintext for unencrypted vaults,
+	//           ciphertext via gocryptfs for encrypted vaults)
+	// keys/   - encryption key material (v1.1)
+	// backups/- backup config cache (v1.1)
 	dirs := []string{
 		cfg.Core.VaultsDir,
 		filepath.Join(dir, "keys"),
-		filepath.Join(dir, "encrypted"),
 		filepath.Join(dir, "backups"),
 	}
 

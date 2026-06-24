@@ -9,6 +9,7 @@ vv-*
 /tmp/
 
 # IDE
+.obsidian/
 .idea/
 .vscode/
 *.swp

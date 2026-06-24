@@ -31,10 +31,42 @@ type CoreConfig struct {
 
 // VaultConfig defines a single vault.
 type VaultConfig struct {
-	Name       string   `toml:"name"`
-	Path       string   `toml:"path,omitempty"` // Override for vaults_dir/<name>
-	Symlinks   []string `toml:"symlinks,omitempty"`
-	Encryption bool     `toml:"encryption"` // v1.1
+	Name       string           `toml:"name"`
+	Path       string           `toml:"path,omitempty"`       // Override for vaults_dir/<name>
+	Symlinks   []string         `toml:"symlinks,omitempty"`
+	Encryption EncryptionConfig `toml:"encryption,omitempty"` // v1.1
+	Backup     BackupConfig     `toml:"backup,omitempty"`     // v1.1
+	Backups    []BackupConfig   `toml:"backups,omitempty"`    // v1.1 (3-2-1 multi-destination)
+}
+
+// EncryptionConfig holds encryption settings for a vault (v1.1).
+// When Encryption.Enabled is true, the vault directory stores ciphertext
+// managed by gocryptfs. A FUSE mount provides a plaintext view for daily use.
+type EncryptionConfig struct {
+	Enabled bool   `toml:"enabled"`
+	Cipher  string `toml:"cipher,omitempty"` // "xchacha20-poly1305" (default) or "aes-gcm"
+}
+
+// BackupConfig holds backup settings for a vault (v1.1).
+// Backups use restic repositories. When multiple [[backups]] entries exist,
+// each defines a separate destination for 3-2-1 backup strategy.
+type BackupConfig struct {
+	Enabled      bool             `toml:"enabled"`
+	Repo         string           `toml:"repo,omitempty"`
+	PasswordCmd  string           `toml:"password_cmd,omitempty"`  // e.g. "pass show restic/personal"
+	PasswordFile string           `toml:"password_file,omitempty"` // Path to file containing password
+	PostSync     bool             `toml:"post_sync,omitempty"`     // Auto-backup after successful sync
+	Schedule     string           `toml:"schedule,omitempty"`      // "post-sync", "daily", "weekly"
+	Retention    RetentionPolicy  `toml:"retention,omitempty"`
+	Exclude      []string         `toml:"exclude,omitempty"`
+}
+
+// RetentionPolicy defines how many snapshots to keep per time bucket (v1.1).
+type RetentionPolicy struct {
+	Daily   int `toml:"daily,omitempty"`
+	Weekly  int `toml:"weekly,omitempty"`
+	Monthly int `toml:"monthly,omitempty"`
+	Yearly  int `toml:"yearly,omitempty"`
 }
 
 // Subscription maps a remote host to the vaults it subscribes to.

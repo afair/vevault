@@ -34,15 +34,19 @@ preserved unless --force is used.
 
 Examples:
   vv init                                  # Central node (no remote)
-  vv init --central homeserver             # Remote pointing to SSH alias
-  vv init --central nas --address 100.64.0.5  # Remote with Tailscale IP`,
+  vv init --central nas                     # Remote pointing to SSH alias
+  vv init --central nas --address 100.64.0.5  # Remote with Tailscale IP
+
+On a remote host, --central is the SSH alias for the central node.
+--address is how central reaches THIS host back (Tailscale IP, FQDN).
+It is passed to central during vv subscribe so SFTP connections work.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInit(cfg, central, address, vaults, force)
 		},
 	}
 
 	cmd.Flags().StringVar(&central, "central", "", "SSH alias for the central node (must exist in ~/.ssh/config)")
-	cmd.Flags().StringVar(&address, "address", "", "How to reach central (Tailscale IP, VPN address, FQDN). Falls back to --central if not set.")
+	cmd.Flags().StringVar(&address, "address", "", "How central reaches this host (Tailscale IP, FQDN). Falls back to hostname if not set.")
 	cmd.Flags().StringVar(&vaults, "vaults", "", "Comma-separated vault names to create")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing config")
 
@@ -99,7 +103,7 @@ func runInit(cfg *config.Config, central, address, vaultList string, force bool)
 		cfg.Core.CentralHost = central
 	}
 	if address != "" {
-		cfg.Core.CentralAddress = address
+		cfg.Core.LocalAddress = address
 	}
 	if cfg.Core.VaultsDir == "" {
 		cfg.Core.VaultsDir = filepath.Join(dir, "vaults")

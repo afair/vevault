@@ -180,9 +180,16 @@ func subscribeFromRemote(cfg *config.Config, vaultName, symlink, address string)
 		return fmt.Errorf("central_host not set — cannot subscribe from a remote host without it")
 	}
 
-	myHost, _ := os.Hostname()
-	if address != "" {
-		myHost = address // Use --address value as the host identity.
+	myHost := cfg.LocalHostName()
+
+	// If --address not given here, fall back to what was set at init time.
+	if address == "" {
+		address = cfg.Core.LocalAddress
+	}
+	// The address central uses to reach this host (or hostname as fallback).
+	reachableAddr := address
+	if reachableAddr == "" {
+		reachableAddr = myHost
 	}
 
 	// Create the local vault directory so rclone bisync --resync can
@@ -193,6 +200,9 @@ func subscribeFromRemote(cfg *config.Config, vaultName, symlink, address string)
 	}
 
 	fmt.Printf("Subscribing this host (%s) to vault %q via %s...\n", myHost, vaultName, central)
+	if address != "" {
+		fmt.Printf("  Central will reach this host at: %s\n", address)
+	}
 
 	// 1. Delegate subscription + initial sync to central.
 	args := []string{cfg.CentralAddress(), "vv", "subscribe", vaultName, "--host", myHost}

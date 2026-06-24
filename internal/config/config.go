@@ -26,6 +26,7 @@ type CoreConfig struct {
 	CentralHost    string `toml:"central_host"`
 	CentralAddress string `toml:"central_address,omitempty"` // How to reach central (SSH/rclone). Falls back to central_host.
 	LocalHost      string `toml:"local_host,omitempty"`      // This host's identity on the vault network. Falls back to os.Hostname().
+	LocalAddress   string `toml:"local_address,omitempty"`   // How central reaches this host (Tailscale IP, FQDN). Falls back to LocalHost.
 	VaultsDir      string `toml:"vaults_dir"`
 }
 
@@ -271,6 +272,15 @@ func (c *Config) LocalHostName() string {
 	}
 	h, _ := os.Hostname()
 	return h
+}
+
+// LocalAddress returns the address central should use to reach this host.
+// Falls back to LocalHostName() if not explicitly set.
+func (c *Config) LocalAddress() string {
+	if c.Core.LocalAddress != "" {
+		return c.Core.LocalAddress
+	}
+	return c.LocalHostName()
 }
 
 // expandTilde replaces a leading ~ with the user's home directory.

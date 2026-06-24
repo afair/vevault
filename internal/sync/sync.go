@@ -17,7 +17,10 @@ import (
 
 // NewCmd returns the "sync" subcommand.
 func NewCmd(cfg *config.Config) *cobra.Command {
-	var pull bool
+	var (
+		pull   bool
+		resync bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "sync [<vault>]",
@@ -30,6 +33,9 @@ On a non-central host, this delegates to central over SSH:
 Use --pull on a non-central host to catch up without propagating:
     vv sync --pull          # Pull latest from central, skip fan-out
 
+Use --resync after deleting/recreating a vault to reset bisync state:
+    vv sync --resync        # Central's copy is authoritative
+
 On the central node, this syncs all vaults with all subscribed hosts.
 Use 'vv updates <host>' to target a single host.`,
 		Args: cobra.MaximumNArgs(1),
@@ -40,14 +46,15 @@ Use 'vv updates <host>' to target a single host.`,
 			}
 
 			if !cfg.IsCentral() {
-				return delegateToCentral(cfg, vaultName, pull)
+				return delegateToCentral(cfg, vaultName, pull, resync)
 			}
 			// On central, sync with all subscribed hosts.
-			return syncAll(cfg, vaultName)
+			return syncAll(cfg, vaultName, resync)
 		},
 	}
 
 	cmd.Flags().BoolVar(&pull, "pull", false, "Pull latest from central without propagating to other hosts")
+	cmd.Flags().BoolVarP(&resync, "resync", "R", false, "Reset bisync state — central's copy is authoritative")
 
 	cmd.AddCommand(newConfigSyncCmd(cfg))
 
@@ -58,7 +65,10 @@ Use 'vv updates <host>' to target a single host.`,
 // main.go alongside "sync". It is intended to be invoked on central,
 // either directly or via SSH from a non-central host.
 func NewUpdatesCmd(cfg *config.Config) *cobra.Command {
-	var noPropagate bool
+	var (
+		noPropagate bool
+		resync      bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "updates <host> [<vault>]",
@@ -67,6 +77,7 @@ func NewUpdatesCmd(cfg *config.Config) *cobra.Command {
 then propagates changes to all other subscribers of the affected vaults.
 
 Use --no-propagate (-n) to skip fan-out and only sync with the host.
+Use --resync (-R) to reset bisync state after recreating vaults.
 
 This is the target of "vv sync" on non-central hosts.`,
 		Args: cobra.RangeArgs(1, 2),
@@ -80,11 +91,12 @@ This is the target of "vv sync" on non-central hosts.`,
 			if !cfg.IsCentral() {
 				return fmt.Errorf("updates must run on the central node")
 			}
-			return runUpdates(cfg, host, vaultName, noPropagate)
+			return runUpdates(cfg, host, vaultName, noPropagate, resync)
 		},
 	}
 
 	cmd.Flags().BoolVarP(&noPropagate, "no-propagate", "n", false, "Skip propagating changes to other subscribers")
+	cmd.Flags().BoolVarP(&resync, "resync", "R", false, "Reset bisync state — central's copy is authoritative")
 
 	return cmd
 }
@@ -117,7 +129,7 @@ func newConfigSyncCmd(cfg *config.Config) *cobra.Command {
 
 // syncAll runs updates for every subscribed host. Used when vv sync is
 // invoked on central without targeting a specific host.
-func syncAll(cfg *config.Config, vaultName string) error {
+func syncAll(cfg *config.Config, vaultName string, resync bool) error {
 	if len(cfg.Subscriptions) == 0 {
 		fmt.Println("No subscribed hosts.")
 		fmt.Println("Hint: subscribe a remote host with 'vv subscribe <vault> --host <host>'")
@@ -139,7 +151,7 @@ func syncAll(cfg *config.Config, vaultName string) error {
 	for _, host := range hosts {
 		fmt.Printf("\n── %s ──\n", host)
 		// Don't propagate — each host gets a direct bisync in its own turn.
-		if err := runUpdates(cfg, host, vaultName, true); err != nil {
+		if err := runUpdates(cfg, host, vaultName, true, resync); err != nil {
 			return fmt.Errorf("sync with %s: %w", host, err)
 		}
 	}
@@ -150,7 +162,7 @@ func syncAll(cfg *config.Config, vaultName string) error {
 
 // runUpdates performs the core sync: bisync central with host, then
 // optionally propagate to all other subscribers.
-func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool) error {
+func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool, resync bool) error {
 	vaults := vaultList(cfg, host, vaultName)
 
 	if len(vaults) == 0 {
@@ -163,7 +175,7 @@ func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool) er
 		fmt.Printf("Syncing vault %q with %s...\n", v, host)
 		fmt.Printf("  central: %s\n", cfg.VaultPath(v))
 		fmt.Printf("  remote:  %s @ %s\n", cfg.RemoteVaultPath(v, host), cfg.HostAddress(host))
-		if err := bisyncVault(cfg, v, host); err != nil {
+		if err := bisyncVault(cfg, v, host, resync); err != nil {
 			return fmt.Errorf("bisync %q with %s: %w", v, host, err)
 		}
 		fmt.Printf("  ✓ %s ↔ %s synced\n\n", v, host)
@@ -177,7 +189,7 @@ func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool) er
 			for _, sv := range s.Vaults {
 				if sv == v && s.Host != host {
 					fmt.Printf("  Propagating %q to %s...\n", v, s.Host)
-					if err := bisyncVault(cfg, v, s.Host); err != nil {
+					if err := bisyncVault(cfg, v, s.Host, resync); err != nil {
 						return fmt.Errorf("propagating %q to %s: %w", v, s.Host, err)
 					}
 				}
@@ -195,7 +207,7 @@ func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool) er
 // bisyncVault runs rclone bisync between central and a remote host for a
 // single vault. Uses RemoteVaultPath for the remote side, falling back to
 // the local path when no per-host override is set.
-func bisyncVault(cfg *config.Config, vaultName, host string) error {
+func bisyncVault(cfg *config.Config, vaultName, host string, resync bool) error {
 	localPath := cfg.VaultPath(vaultName)
 	remotePath := cfg.RemoteVaultPath(vaultName, host)
 
@@ -217,7 +229,6 @@ func bisyncVault(cfg *config.Config, vaultName, host string) error {
 		localPath,
 		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
 		"--create-empty-src-dirs",
-		"--force",
 		"--log-level", "ERROR",
 		"--exclude", ".DS_Store",
 		"--exclude", "*.lck",
@@ -235,6 +246,13 @@ func bisyncVault(cfg *config.Config, vaultName, host string) error {
 		"--exclude", "target/",
 	}
 
+	if resync {
+		args = append(args, "--resync")
+		fmt.Println("  (resync mode — central's copy is authoritative)")
+	} else {
+		args = append(args, "--force")
+	}
+
 	fmt.Printf("  rclone %s\n", strings.Join(args, " "))
 
 	// If a .vvignore file exists in the vault, pass it as a filter.
@@ -246,7 +264,19 @@ func bisyncVault(cfg *config.Config, vaultName, host string) error {
 	cmd := exec.Command("rclone", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+
+	err = cmd.Run()
+	if err != nil {
+		// If bisync exited because state is stale (vault recreated),
+		// give the user a clear hint so they can recover.
+		if !resync && strings.Contains(err.Error(), "exit status") {
+			fmt.Fprintf(os.Stderr, "\nHint: bisync state may be out of date. "+
+				"Try --resync (-R) to reset:\n"+
+				"  vv sync --resync %s\n", vaultName)
+		}
+		return err
+	}
+	return nil
 }
 
 // vaultList returns the vaults to sync for a host. If vaultName is
@@ -270,7 +300,7 @@ func vaultList(cfg *config.Config, host, vaultName string) []string {
 
 // delegateToCentral runs "ssh <central> vv updates <this-host> [<vault>]"
 // with an optional --no-propagate flag for pull-only syncs.
-func delegateToCentral(cfg *config.Config, vaultName string, pull bool) error {
+func delegateToCentral(cfg *config.Config, vaultName string, pull bool, resync bool) error {
 	central := cfg.Core.CentralHost
 	address := cfg.CentralAddress()
 	if central == "" {
@@ -288,7 +318,15 @@ func delegateToCentral(cfg *config.Config, vaultName string, pull bool) error {
 	}
 	if pull {
 		args = append(args, "--no-propagate")
+	}
+	if resync {
+		args = append(args, "--resync")
+	}
+
+	if pull && !resync {
 		fmt.Printf("Delegating pull-only sync to central (%s)...\n", address)
+	} else if resync {
+		fmt.Printf("Delegating resync to central (%s)...\n", address)
 	} else {
 		fmt.Printf("Delegating to central (%s)...\n", address)
 	}

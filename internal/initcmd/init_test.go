@@ -21,7 +21,7 @@ func setup(t *testing.T) (*config.Config, string) {
 func TestInit_Fresh(t *testing.T) {
 	cfg, home := setup(t)
 
-	if err := runInit(cfg, "", "", false); err != nil {
+	if err := runInit(cfg, "", "", "", false); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
@@ -42,7 +42,7 @@ func TestInit_Fresh(t *testing.T) {
 func TestInit_WithVaults(t *testing.T) {
 	cfg, home := setup(t)
 
-	if err := runInit(cfg, "", "personal,work", false); err != nil {
+	if err := runInit(cfg, "", "", "personal,work", false); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestInit_WithVaults(t *testing.T) {
 func TestInit_WithCentral(t *testing.T) {
 	cfg, _ := setup(t)
 
-	if err := runInit(cfg, "homeserver", "", false); err != nil {
+	if err := runInit(cfg, "homeserver", "", "", false); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
@@ -81,7 +81,7 @@ func TestInit_WithCentral(t *testing.T) {
 func TestInit_WithVaultsAndCentral(t *testing.T) {
 	cfg, _ := setup(t)
 
-	if err := runInit(cfg, "nas", "docs,media", false); err != nil {
+	if err := runInit(cfg, "nas", "", "docs,media", false); err != nil {
 		t.Fatalf("init failed: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestInit_AlreadyInitialized_NoOp(t *testing.T) {
 	cfg, _ := setup(t)
 
 	// First init.
-	if err := runInit(cfg, "", "", false); err != nil {
+	if err := runInit(cfg, "", "", "", false); err != nil {
 		t.Fatalf("first init: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestInit_AlreadyInitialized_NoOp(t *testing.T) {
 	cfg.Core.CentralHost = "first"
 
 	// Second init without force should no-op (config unchanged).
-	if err := runInit(cfg, "second", "", false); err != nil {
+	if err := runInit(cfg, "second", "", "", false); err != nil {
 		t.Fatalf("second init: %v", err)
 	}
 
@@ -121,13 +121,13 @@ func TestInit_Force(t *testing.T) {
 	cfg, _ := setup(t)
 
 	// First init.
-	if err := runInit(cfg, "", "", false); err != nil {
+	if err := runInit(cfg, "", "", "", false); err != nil {
 		t.Fatalf("first init: %v", err)
 	}
 	firstVaults := len(cfg.Vaults)
 
 	// Force re-init should succeed.
-	if err := runInit(cfg, "newcentral", "", true); err != nil {
+	if err := runInit(cfg, "newcentral", "", "", true); err != nil {
 		t.Fatalf("force re-init: %v", err)
 	}
 
@@ -144,12 +144,12 @@ func TestInit_ForceWithVaults(t *testing.T) {
 	cfg, _ := setup(t)
 
 	// First init with vaults.
-	if err := runInit(cfg, "", "old1,old2", false); err != nil {
+	if err := runInit(cfg, "", "", "old1,old2", false); err != nil {
 		t.Fatalf("first init: %v", err)
 	}
 
 	// Force re-init with different vaults.
-	if err := runInit(cfg, "", "new1", true); err != nil {
+	if err := runInit(cfg, "", "", "new1", true); err != nil {
 		t.Fatalf("force re-init: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestAlreadyInitialized_False(t *testing.T) {
 
 func TestAlreadyInitialized_True(t *testing.T) {
 	cfg, _ := setup(t)
-	if err := runInit(cfg, "", "", false); err != nil {
+	if err := runInit(cfg, "", "", "", false); err != nil {
 		t.Fatal(err)
 	}
 	if !AlreadyInitialized() {

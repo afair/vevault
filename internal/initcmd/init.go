@@ -18,6 +18,7 @@ import (
 func NewCmd(cfg *config.Config) *cobra.Command {
 	var (
 		central string
+		address string
 		vaults  string
 		force   bool
 	)
@@ -29,20 +30,26 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 
 Creates ~/.local/share/vevault/ with the full directory tree and a
 default config.toml. Safe to run multiple times — existing config is
-preserved unless --force is used.`,
+preserved unless --force is used.
+
+Examples:
+  vv init                                  # Central node (no remote)
+  vv init --central homeserver             # Remote pointing to SSH alias
+  vv init --central nas --address 100.64.0.5  # Remote with Tailscale IP`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cfg, central, vaults, force)
+			return runInit(cfg, central, address, vaults, force)
 		},
 	}
 
-	cmd.Flags().StringVar(&central, "central", "", "SSH alias for the central node")
+	cmd.Flags().StringVar(&central, "central", "", "SSH alias for the central node (must exist in ~/.ssh/config)")
+	cmd.Flags().StringVar(&address, "address", "", "How to reach central (Tailscale IP, VPN address, FQDN). Falls back to --central if not set.")
 	cmd.Flags().StringVar(&vaults, "vaults", "", "Comma-separated vault names to create")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing config")
 
 	return cmd
 }
 
-func runInit(cfg *config.Config, central, vaultList string, force bool) error {
+func runInit(cfg *config.Config, central, address, vaultList string, force bool) error {
 	dir := config.Dir()
 	configPath := config.Path()
 
@@ -90,6 +97,9 @@ func runInit(cfg *config.Config, central, vaultList string, force bool) error {
 	}
 	if central != "" {
 		cfg.Core.CentralHost = central
+	}
+	if address != "" {
+		cfg.Core.CentralAddress = address
 	}
 	if cfg.Core.VaultsDir == "" {
 		cfg.Core.VaultsDir = filepath.Join(dir, "vaults")

@@ -354,6 +354,7 @@ func execBisync(cfg *config.Config, vaultName, host string, resync bool) error {
 		"bisync",
 		localPath,
 		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
+		"--perms",
 		"--create-empty-src-dirs",
 	}
 	if resync {

@@ -228,7 +228,7 @@ func bisyncVault(cfg *config.Config, vaultName, host string, resync bool) error 
 		"bisync",
 		localPath,
 		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
-		"--perms",
+		"--metadata",
 		"--create-empty-src-dirs",
 		"--log-level", "ERROR",
 		"--exclude", ".DS_Store",

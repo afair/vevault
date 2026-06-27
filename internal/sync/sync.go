@@ -110,19 +110,55 @@ func newConfigSyncCmd(cfg *config.Config) *cobra.Command {
 			if !cfg.IsCentral() {
 				return delegateConfigSync(cfg)
 			}
-			fmt.Println("Syncing config to all subscribed hosts...")
-			// TODO: scp config.toml + keys/ to each subscription host.
-			for _, s := range cfg.Subscriptions {
-				fmt.Printf("  → %s\n", s.Host)
-				// scp cfg.path → s.Host:~/.local/share/vevault/config.toml
-			}
-			fmt.Println("Config sync complete.")
-			return nil
+			return syncConfigToAllHosts(cfg)
 		},
 	}
 	// Override the parent "sync" Use so cobra doesn't conflict.
 	cmd.Use = "sync --config"
 	return cmd
+}
+
+// syncConfigToAllHosts SCPs config.toml and keys/ to every subscribed host.
+func syncConfigToAllHosts(cfg *config.Config) error {
+	configPath := config.Path()
+	keysDir := filepath.Join(config.Dir(), "keys")
+
+	fmt.Println("Syncing config to all subscribed hosts...")
+
+	for _, s := range cfg.Subscriptions {
+		addr := cfg.HostAddress(s.Host)
+		remoteDir := fmt.Sprintf("%s:~/.local/share/vevault/", addr)
+
+		fmt.Printf("  → %s (%s)\n", s.Host, addr)
+
+		// SCP config.toml.
+		if err := runSCP(configPath, remoteDir); err != nil {
+			fmt.Fprintf(os.Stderr, "    Warning: config sync to %s failed: %v\n", s.Host, err)
+			continue
+		}
+
+		// SCP keys/ if the directory exists.
+		if info, err := os.Stat(keysDir); err == nil && info.IsDir() {
+			if err := runSCP("-r", keysDir, remoteDir); err != nil {
+				fmt.Fprintf(os.Stderr, "    Warning: keys sync to %s failed: %v\n", s.Host, err)
+			}
+		}
+	}
+
+	fmt.Println("Config sync complete.")
+	return nil
+}
+
+// runSCP shells out to scp. extraArgs are passed before the source/target
+// (e.g. "-r" for recursive).
+func runSCP(args ...string) error {
+	cmd := exec.Command("scp", args...)
+	// scp can be noisy; suppress progress unless verbose.
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // --- sync logic -------------------------------------------------------

@@ -15,11 +15,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// DryRun is set by the --dry-run flag. When true, bisyncVault, runSCP,
+// delegateToCentral, and delegateConfigSync print the command they
+// would execute instead of running it. Exported for testability.
+var DryRun bool
+
 // NewCmd returns the "sync" subcommand.
 func NewCmd(cfg *config.Config) *cobra.Command {
 	var (
 		pull   bool
 		resync bool
+		dryRun bool
 	)
 
 	cmd := &cobra.Command{
@@ -36,10 +42,13 @@ Use --pull on a non-central host to catch up without propagating:
 Use --resync after deleting/recreating a vault to reset bisync state:
     vv sync --resync        # Central's copy is authoritative
 
+Use --dry-run to preview commands without executing them.
+
 On the central node, this syncs all vaults with all subscribed hosts.
 Use 'vv updates <host>' to target a single host.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			DryRun = dryRun
 			vaultName := ""
 			if len(args) == 1 {
 				vaultName = args[0]
@@ -55,6 +64,7 @@ Use 'vv updates <host>' to target a single host.`,
 
 	cmd.Flags().BoolVar(&pull, "pull", false, "Pull latest from central without propagating to other hosts")
 	cmd.Flags().BoolVarP(&resync, "resync", "R", false, "Reset bisync state — central's copy is authoritative")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print commands without executing them")
 
 	cmd.AddCommand(newConfigSyncCmd(cfg))
 
@@ -68,6 +78,7 @@ func NewUpdatesCmd(cfg *config.Config) *cobra.Command {
 	var (
 		noPropagate bool
 		resync      bool
+		dryRun      bool
 	)
 
 	cmd := &cobra.Command{
@@ -78,10 +89,12 @@ then propagates changes to all other subscribers of the affected vaults.
 
 Use --no-propagate (-n) to skip fan-out and only sync with the host.
 Use --resync (-R) to reset bisync state after recreating vaults.
+Use --dry-run to preview commands without executing them.
 
 This is the target of "vv sync" on non-central hosts.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			DryRun = dryRun
 			host := args[0]
 			vaultName := ""
 			if len(args) == 2 {
@@ -97,6 +110,7 @@ This is the target of "vv sync" on non-central hosts.`,
 
 	cmd.Flags().BoolVarP(&noPropagate, "no-propagate", "n", false, "Skip propagating changes to other subscribers")
 	cmd.Flags().BoolVarP(&resync, "resync", "R", false, "Reset bisync state — central's copy is authoritative")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print commands without executing them")
 
 	return cmd
 }
@@ -152,6 +166,11 @@ func syncConfigToAllHosts(cfg *config.Config) error {
 // runSCP shells out to scp. extraArgs are passed before the source/target
 // (e.g. "-r" for recursive).
 func runSCP(args ...string) error {
+	if DryRun {
+		fmt.Printf("  [dry-run] would execute: scp %s\n", strings.Join(args, " "))
+		return nil
+	}
+
 	cmd := exec.Command("scp", args...)
 	// scp can be noisy; suppress progress unless verbose.
 	cmd.Stderr = os.Stderr
@@ -298,6 +317,11 @@ func bisyncVault(cfg *config.Config, vaultName, host string, resync bool) error 
 		args = append(args, "--filter-from", vvignore)
 	}
 
+	if DryRun {
+		fmt.Printf("  [dry-run] would execute: rclone %s\n", strings.Join(args, " "))
+		return nil
+	}
+
 	cmd := exec.Command("rclone", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -369,6 +393,10 @@ func delegateToCentral(cfg *config.Config, vaultName string, pull bool, resync b
 	}
 	fmt.Printf("  → ssh %s\n", strings.Join(args, " "))
 
+	if DryRun {
+		return nil
+	}
+
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -382,7 +410,14 @@ func delegateConfigSync(cfg *config.Config) error {
 	}
 
 	fmt.Printf("Delegating config sync to central (%s)...\n", central)
-	cmd := exec.Command("ssh", cfg.CentralAddress(), "vv", "sync", "--config")
+
+	sshArgs := []string{cfg.CentralAddress(), "vv", "sync", "--config"}
+	if DryRun {
+		fmt.Printf("  [dry-run] would execute: ssh %s\n", strings.Join(sshArgs, " "))
+		return nil
+	}
+
+	cmd := exec.Command("ssh", sshArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

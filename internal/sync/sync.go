@@ -184,6 +184,7 @@ func runSCP(args ...string) error {
 
 // syncAll runs updates for every subscribed host. Used when vv sync is
 // invoked on central without targeting a specific host.
+// Unreachable hosts are skipped with a warning; the loop continues.
 func syncAll(cfg *config.Config, vaultName string, resync bool) error {
 	if len(cfg.Subscriptions) == 0 {
 		fmt.Println("No subscribed hosts.")
@@ -203,20 +204,28 @@ func syncAll(cfg *config.Config, vaultName string, resync bool) error {
 
 	fmt.Printf("Syncing with %d host(s)...\n", len(hosts))
 
+	var errs []string
 	for _, host := range hosts {
 		fmt.Printf("\n── %s ──\n", host)
 		// Don't propagate — each host gets a direct bisync in its own turn.
 		if err := runUpdates(cfg, host, vaultName, true, resync); err != nil {
-			return fmt.Errorf("sync with %s: %w", host, err)
+			fmt.Fprintf(os.Stderr, "Warning: sync with %s failed: %v\n", host, err)
+			errs = append(errs, fmt.Sprintf("%s: %v", host, err))
 		}
 	}
 
-	fmt.Printf("\nAll hosts synced (%d total).\n", len(hosts))
+	successful := len(hosts) - len(errs)
+	fmt.Printf("\nSync complete: %d/%d hosts synced.\n", successful, len(hosts))
+	if len(errs) > 0 {
+		return fmt.Errorf("%d host(s) failed: %s", len(errs), strings.Join(errs, "; "))
+	}
 	return nil
 }
 
 // runUpdates performs the core sync: bisync central with host, then
 // optionally propagate to all other subscribers.
+// Individual vault sync failures are logged and the loop continues;
+// propagation failures are also logged without aborting.
 func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool, resync bool) error {
 	vaults := vaultList(cfg, host, vaultName)
 
@@ -226,12 +235,15 @@ func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool, re
 		return nil
 	}
 
+	var errs []string
 	for _, v := range vaults {
 		fmt.Printf("Syncing vault %q with %s...\n", v, host)
 		fmt.Printf("  central: %s\n", cfg.VaultPath(v))
 		fmt.Printf("  remote:  %s @ %s\n", cfg.RemoteVaultPath(v, host), cfg.HostAddress(host))
 		if err := bisyncVault(cfg, v, host, resync); err != nil {
-			return fmt.Errorf("bisync %q with %s: %w", v, host, err)
+			fmt.Fprintf(os.Stderr, "  ✗ bisync %q with %s failed: %v\n", v, host, err)
+			errs = append(errs, fmt.Sprintf("bisync %q: %v", v, err))
+			continue
 		}
 		fmt.Printf("  ✓ %s ↔ %s synced\n\n", v, host)
 
@@ -245,16 +257,23 @@ func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool, re
 				if sv == v && s.Host != host {
 					fmt.Printf("  Propagating %q to %s...\n", v, s.Host)
 					if err := bisyncVault(cfg, v, s.Host, resync); err != nil {
-						return fmt.Errorf("propagating %q to %s: %w", v, s.Host, err)
+						fmt.Fprintf(os.Stderr, "  ✗ propagation %q to %s failed: %v\n", v, s.Host, err)
+						errs = append(errs, fmt.Sprintf("propagation %q to %s: %v", v, s.Host, err))
 					}
 				}
 			}
 		}
 	}
 
-	fmt.Printf("\nSync complete for host %q (%d vaults).\n", host, len(vaults))
-	if !noPropagate && len(cfg.Subscriptions) > 1 {
+	successful := len(vaults) - len(errs)
+	if successful > 0 {
+		fmt.Printf("\nSync complete for host %q (%d/%d vaults).\n", host, successful, len(vaults))
+	}
+	if !noPropagate && len(cfg.Subscriptions) > 1 && len(errs) == 0 {
 		fmt.Println("Propagation to other subscribers complete.")
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%d error(s): %s", len(errs), strings.Join(errs, "; "))
 	}
 	return nil
 }

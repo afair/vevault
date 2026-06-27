@@ -3,11 +3,13 @@
 package subscribe
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"vevault/internal/config"
 
@@ -354,6 +356,7 @@ func execBisync(cfg *config.Config, vaultName, host string, resync bool) error {
 		"bisync",
 		localPath,
 		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
+		"--contimeout", "3s",
 		"--metadata",
 		"--create-empty-src-dirs",
 	}
@@ -386,10 +389,16 @@ func execBisync(cfg *config.Config, vaultName, host string, resync bool) error {
 
 	fmt.Printf("  rclone %s\n", strings.Join(args, " "))
 
-	cmd := exec.Command("rclone", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "rclone", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("connection to %s timed out after 5s", host)
+	}
+	return err
 }
 
 func createSymlink(target, source string) error {

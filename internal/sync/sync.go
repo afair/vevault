@@ -4,11 +4,13 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"vevault/internal/config"
 
@@ -19,6 +21,11 @@ import (
 // delegateToCentral, and delegateConfigSync print the command they
 // would execute instead of running it. Exported for testability.
 var DryRun bool
+
+// bisyncTimeout is the hard deadline for each rclone bisync invocation.
+// Covers DNS resolution, TCP handshake, and SSH auth.
+// A host that can't connect within this window is considered unreachable.
+const bisyncTimeout = 5 * time.Second
 
 // NewCmd returns the "sync" subcommand.
 func NewCmd(cfg *config.Config) *cobra.Command {
@@ -225,7 +232,8 @@ func syncAll(cfg *config.Config, vaultName string, resync bool) error {
 // runUpdates performs the core sync: bisync central with host, then
 // optionally propagate to all other subscribers.
 // Individual vault sync failures are logged and the loop continues;
-// propagation failures are also logged without aborting.
+// once a host is unreachable, remaining vaults for that host are skipped.
+// Propagation failures are also logged without aborting.
 func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool, resync bool) error {
 	vaults := vaultList(cfg, host, vaultName)
 
@@ -235,14 +243,25 @@ func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool, re
 		return nil
 	}
 
+	// Hosts that have already failed this run — skip remaining vaults
+	// and propagations to them. Avoids retrying an unreachable host
+	// for every vault.
+	deadHosts := map[string]bool{}
+
 	var errs []string
 	for _, v := range vaults {
+		if deadHosts[host] {
+			fmt.Printf("Skipping vault %q for %s (host unreachable)\n", v, host)
+			continue
+		}
+
 		fmt.Printf("Syncing vault %q with %s...\n", v, host)
 		fmt.Printf("  central: %s\n", cfg.VaultPath(v))
 		fmt.Printf("  remote:  %s @ %s\n", cfg.RemoteVaultPath(v, host), cfg.HostAddress(host))
 		if err := bisyncVault(cfg, v, host, resync); err != nil {
 			fmt.Fprintf(os.Stderr, "  ✗ bisync %q with %s failed: %v\n", v, host, err)
 			errs = append(errs, fmt.Sprintf("bisync %q: %v", v, err))
+			deadHosts[host] = true // Don't retry this host for remaining vaults.
 			continue
 		}
 		fmt.Printf("  ✓ %s ↔ %s synced\n\n", v, host)
@@ -255,10 +274,14 @@ func runUpdates(cfg *config.Config, host, vaultName string, noPropagate bool, re
 		for _, s := range cfg.Subscriptions {
 			for _, sv := range s.Vaults {
 				if sv == v && s.Host != host {
+					if deadHosts[s.Host] {
+						continue
+					}
 					fmt.Printf("  Propagating %q to %s...\n", v, s.Host)
 					if err := bisyncVault(cfg, v, s.Host, resync); err != nil {
 						fmt.Fprintf(os.Stderr, "  ✗ propagation %q to %s failed: %v\n", v, s.Host, err)
 						errs = append(errs, fmt.Sprintf("propagation %q to %s: %v", v, s.Host, err))
+						deadHosts[s.Host] = true
 					}
 				}
 			}
@@ -302,6 +325,7 @@ func bisyncVault(cfg *config.Config, vaultName, host string, resync bool) error 
 		"bisync",
 		localPath,
 		fmt.Sprintf(":sftp,host=%s:%s", cfg.HostAddress(host), remotePath),
+		"--contimeout", "3s",
 		"--metadata",
 		"--create-empty-src-dirs",
 		"--log-level", "ERROR",
@@ -341,12 +365,18 @@ func bisyncVault(cfg *config.Config, vaultName, host string, resync bool) error 
 		return nil
 	}
 
-	cmd := exec.Command("rclone", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), bisyncTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "rclone", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	err = cmd.Run()
 	if err != nil {
+		// Context deadline exceeded = host unreachable / timed out.
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("connection to %s timed out after %v", host, bisyncTimeout)
+		}
 		// If bisync exited because state is stale (vault recreated),
 		// give the user a clear hint so they can recover.
 		if !resync && strings.Contains(err.Error(), "exit status") {

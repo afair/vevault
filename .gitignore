@@ -1,6 +1,6 @@
-# Binary
-vv
-vv-*
+# Binary (only at root)
+/vv
+/vv-*
 
 # Test binaries
 *.test

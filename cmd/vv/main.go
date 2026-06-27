@@ -14,6 +14,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Version is set at build time via -ldflags. Falls back to "dev" for
+// local builds.
+var Version = "dev"
+
 func main() {
 	// Parse --profile / -p early so config.Dir() knows where to look.
 	if profile := parseProfileFlag(); profile != "" {
@@ -52,6 +56,7 @@ Use --profile <name> to switch between independent vault sets.`,
 	}
 
 	root.PersistentFlags().StringP("profile", "p", "", "Vevault profile name (default: vevault)")
+	root.Version = Version
 
 	root.AddCommand(initcmd.NewCmd(cfg))
 	root.AddCommand(vault.NewCmd(cfg))

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"vevault/internal/config"
+	"vevault/internal/copycmd"
 	"vevault/internal/initcmd"
 	"vevault/internal/subscribe"
 	"vevault/internal/sync"
@@ -64,6 +65,7 @@ Use --profile <name> to switch between independent vault sets.`,
 	root.AddCommand(sync.NewUpdatesCmd(cfg))
 	root.AddCommand(subscribe.NewSubscribeCmd(cfg))
 	root.AddCommand(subscribe.NewUnsubscribeCmd(cfg))
+	root.AddCommand(copycmd.NewCmd(cfg))
 	// Future: root.AddCommand(subscribe.NewCmd(cfg))
 	// Future: root.AddCommand(backup.NewCmd(cfg))
 	// Future: root.AddCommand(crypto.NewCmd(cfg))
